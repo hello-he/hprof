@@ -6,7 +6,7 @@ Android内存监控工具，通过ADB shell监控Android应用的内存、线程
 
 ### 1. 离线Hprof分析 (`analyze`)
 - 分析hprof文件，检测内存泄漏
-- 自动提取Bitmap图片（支持Android 14+ dumpData）
+- 自动提取Bitmap图片（支持Android 14+ `am dumpheap -b png`）
 - 生成HTML/文本分析报告
 - 检测重复Bitmap，计算内存浪费
 
@@ -23,118 +23,175 @@ Android内存监控工具，通过ADB shell监控Android应用的内存、线程
 - 识别潜在风险
 
 ### 4. Bitmap提取
-- 支持Android 14+ `am dumpheap -b png`压缩数据
+- 支持Android 14+ dumpData压缩数据
 - 自动检测重复Bitmap
-- 生成可视化报告
+- 生成可视化HTML报告
 
 ## 项目结构
 
 ```
 mem-monitor/
 ├── src/main/java/com/koom/monitor/
-│   ├── Main.kt                 # CLI入口
+│   ├── Main.kt                      # CLI入口
 │   ├── adb/
-│   │   └── AdbClient.kt        # ADB通信封装
+│   │   └── AdbClient.kt           # ADB通信封装，支持dumpheap
 │   ├── analyzer/
-│   │   ├── BitmapExtractor.kt # Bitmap提取和分析
-│   │   ├── HprofAnalyzer.kt    # Hprof文件分析
-│   │   └── HprofRawReader.kt   # Hprof原始数据读取
+│   │   ├── BitmapExtractor.kt     # Bitmap提取、重复检测、报告生成
+│   │   ├── HprofAnalyzer.kt      # Hprof文件分析、泄漏检测
+│   │   └── HprofRawReader.kt      # Hprof原始数据读取
 │   ├── command/
-│   │   ├── AnalyzeCommand.kt   # analyze命令
-│   │   ├── ScanCommand.kt      # scan命令
-│   │   └── WatchCommand.kt     # watch命令
+│   │   ├── AnalyzeCommand.kt     # analyze命令实现
+│   │   ├── ScanCommand.kt        # scan命令实现
+│   │   └── WatchCommand.kt       # watch命令实现
 │   └── model/
-│       ├── MonitorConfig.kt    # 监控配置
-│       └── MetricsSnapshot.kt  # 指标快照
-├── demo/                       # Bitmap泄露测试APK
-└── build/libs/
-    └── mem-monitor-1.0.0-all.jar  # 可执行JAR
+│       ├── MonitorConfig.kt      # 监控配置模型
+│       └── MetricsSnapshot.kt    # 内存/线程/FD快照
+├── demo/                          # Bitmap泄露测试APK（独立项目）
+│   └── app/src/main/java/com/koom/leak/
+│       └── MainActivity.java      # 测试Activity，创建Bitmap泄露
+├── scripts/                       # 测试脚本
+│   ├── monkey_test.sh             # Monkey测试脚本
+│   ├── watch_test.sh              # Watch监控脚本
+│   └── run_test.sh                # 综合测试脚本
+├── build/libs/
+│   └── mem-monitor-1.0.0-all.jar # 可执行JAR
+└── README.md
 ```
 
-## 使用方法
+## 快速开始
 
-### 前置要求
-- JDK 17+
-- ADB已配置
-- Android设备已连接并授权USB调试
+### 1. 构建工具
 
-### 离线分析Hprof文件
+```bash
+cd /path/to/mem-monitor
+./gradlew shadowJar
+```
+
+输出: `build/libs/mem-monitor-1.0.0-all.jar`
+
+### 2. 离线分析Hprof文件
 
 ```bash
 # 基本分析
-java -jar mem-monitor-1.0.0-all.jar analyze -f heap.hprof
+java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof
 
-# 提取Bitmap并生成报告
-java -jar mem-monitor-1.0.0-all.jar analyze -f heap.hprof --extract-bitmaps
+# 提取Bitmap并生成完整报告
+java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof --extract-bitmaps
 
 # 只提取大Bitmap(>1M像素)
-java -jar mem-monitor-1.0.0-all.jar analyze -f heap.hprof --extract-bitmaps --large-only
+java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof --extract-bitmaps --large-only
 
 # 指定输出目录
-java -jar mem-monitor-1.0.0-all.jar analyze -f heap.hprof -o ./reports
+java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof -o ./reports
 ```
 
-### 实时监控应用
+### 3. 实时监控应用
 
 ```bash
 # 监控单个应用
-java -jar mem-monitor-1.0.0-all.jar watch -p com.example.app
+java -jar build/libs/mem-monitor-1.0.0-all.jar watch -p com.example.app
 
 # 设置阈值并监控
-java -jar mem-monitor-1.0.0-all.jar watch -p com.example.app \
+java -jar build/libs/mem-monitor-1.0.0-all.jar watch -p com.example.app \
   --heap-threshold 512 \
   --thread-threshold 300 \
   --fd-threshold 500
 
 # 指定ADB路径
-java -jar mem-monitor-1.0.0-all.jar watch -p com.example.app --adb /path/to/adb
+java -jar build/libs/mem-monitor-1.0.0-all.jar watch -p com.example.app --adb /path/to/adb
 ```
 
-### 单次扫描
+### 4. 单次扫描
 
 ```bash
 # 扫描多个应用
-java -jar mem-monitor-1.0.0-all.jar scan -p com.example.app,com.another.app
+java -jar build/libs/mem-monitor-1.0.0-all.jar scan -p com.example.app,com.another.app
 
 # 扫描并设置阈值
-java -jar mem-monitor-1.0.0-all.jar scan -p com.example.app \
+java -jar build/libs/mem-monitor-1.0.0-all.jar scan -p com.example.app \
   --heap-threshold 400 --thread-threshold 200
 ```
 
+## 命令行参数
+
+### analyze 命令
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-f, --file <file>` | hprof文件路径 | 必填 |
+| `-o, --output <dir>` | 输出目录 | ./reports |
+| `--extract-bitmaps` | 提取Bitmap图片 | false |
+| `--large-only` | 只提取大Bitmap(>1M像素) | false |
+
+### watch 命令
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-p, --package <name>` | 应用包名 | 必填 |
+| `--heap-threshold <MB>` | 堆内存阈值(MB) | 512 |
+| `--thread-threshold <count>` | 线程数阈值 | 300 |
+| `--fd-threshold <count>` | 文件句柄阈值 | 500 |
+| `--adb <path>` | ADB路径 | 自动查找 |
+| `-o, --output <dir>` | 输出目录 | ./reports |
+| `--interval <seconds>` | 监控间隔(秒) | 5 |
+
+### scan 命令
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-p, --package <names>` | 应用包名(逗号分隔) | 必填 |
+| `--heap-threshold <MB>` | 堆内存阈值 | 512 |
+| `--thread-threshold <count>` | 线程数阈值 | 300 |
+| `--fd-threshold <count>` | 文件句柄阈值 | 500 |
+
 ## 输出报告
 
-### 目录结构（按hprof文件名区分）
+### 目录结构
+
+输出按hprof文件名自动分目录，避免多个hprof分析结果混乱：
 
 ```
 reports/
-├── heap.hprof/                # 以hprof文件名创建子目录
-│   ├── hprof_analysis_xxx.html
-│   ├── hprof_analysis_xxx.txt
+├── test.hprof/                   # 以hprof文件名创建子目录
+│   ├── hprof_analysis_20260120_210846.html
+│   ├── hprof_analysis_20260120_210846.txt
 │   ├── bitmaps/
-│   │   ├── bitmap_xxx.png
+│   │   ├── bitmap_34530232_4c22e739_52x52.png
+│   │   ├── bitmap_35992936_4c22e739_52x52.png
 │   │   └── ...
 │   ├── bitmap_analysis.txt
 │   └── bitmap_analysis.html
 └── another.hprof/
+    ├── hprof_analysis_xxx.html
     └── ...
 ```
 
 ### 报告内容
 
-**Hprof分析报告** (hprof_analysis_xxx.html)
-- 对象统计
-- 包分类统计
-- Bitmap统计（包含提取目录路径）
-- 泄漏对象详情
+**Hprof分析报告** (`hprof_analysis_xxx.html`)
+- 📊 对象统计（总实例数、总类数等）
+- 📱 按包分类（Android、AndroidX、Java、Kotlin等）
+- 🖼️ Bitmap统计（数量、大Bitmap数量、提取目录路径）
+- 🚨 泄漏对象详情（Activity、Fragment、Bitmap）
 
-**Bitmap分析报告** (bitmap_analysis.html)
-- 总Bitmap数量
-- 大Bitmap列表(>1M像素)
-- 重复Bitmap组
-- 内存浪费统计
-- 可视化图片展示
+**Bitmap分析报告** (`bitmap_analysis.html`)
+- 🔴 大Bitmap展示（>1M像素，带尺寸和内存占用）
+- 🖼️ 所有Bitmap画廊
+- 🔄 重复Bitmap组（SHA-256哈希、内存浪费统计）
 
 ## Bitmap测试Demo
+
+### 功能
+
+`demo/` 目录包含一个独立的Android测试APK，专门用于测试Bitmap内存泄漏：
+
+- **创建Bitmap泄露 (1440x3200)**: 创建常见手机分辨率的大Bitmap
+- **创建10个Bitmap泄露**: 批量创建FHD分辨率Bitmap
+- **创建超大Bitmap (2560x2560)**: 创建超大Bitmap测试极端情况
+
+界面实时显示：
+- 已泄露Bitmap数量
+- 总占用内存(MB)
 
 ### 构建
 
@@ -143,38 +200,81 @@ cd demo
 ./gradlew assembleDebug
 ```
 
+输出: `demo/app/build/outputs/apk/debug/app-debug.apk`
+
 ### 安装
 
 ```bash
-adb install app/build/outputs/apk/debug/app-debug.apk
+adb install -r demo/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 运行Monkey测试
+## 测试脚本
+
+### 1. Monkey测试 (`scripts/monkey_test.sh`)
+
+随机触发应用操作，测试应用稳定性并产生Bitmap泄露：
 
 ```bash
-# 简单monkey测试
-adb shell monkey -p com.koom.leak 1000
-
-# 生成详细报告
-adb shell monkey -p com.koom.leak --throttle 500 -v 1000 > monkey_report.txt
+bash scripts/monkey_test.sh
 ```
 
-### 同时监控
+功能：
+- 自动检查设备连接
+- 自动安装/更新应用
+- 运行5000个随机事件
+- 生成详细报告
+
+### 2. Watch监控 (`scripts/watch_test.sh`)
+
+持续监控应用健康状态：
 
 ```bash
-# 终端1：运行monkey
-adb shell monkey -p com.koom.leak 5000
+bash scripts/watch_test.sh
+```
 
-# 终端2：运行监控
-java -jar mem-monitor-1.0.0-all.jar watch -p com.koom.leak
+功能：
+- 监控堆内存、线程、文件句柄
+- 超阈值自动dump
+- 自动截屏
+- 保存分析报告
+
+### 3. 综合测试 (`scripts/run_test.sh`)
+
+同时运行Monkey和Watch（需要tmux）：
+
+```bash
+bash scripts/run_test.sh
+```
+
+会在tmux中创建两个窗口：
+- 左侧：Watch监控
+- 右侧：Monkey测试
+
+### 手动运行示例
+
+```bash
+# 终端1：启动监控
+java -jar build/libs/mem-monitor-1.0.0-all.jar watch \
+  -p com.koom.leak \
+  --heap-threshold 80 \
+  --thread-threshold 200 \
+  -o ./reports
+
+# 终端2：运行Monkey
+adb shell monkey -p com.koom.leak \
+  --throttle 200 \
+  --pct-touch 60 \
+  -v 3000
 ```
 
 ## 依赖说明
 
-- **Shark库**: Square的Hprof分析库（内置于kshark包）
-- **Picocli**: CLI框架
-- **Okio**: Square的IO库
-- **ImageIO**: Java图片处理
+| 库 | 用途 | 版本 |
+|-----|------|------|
+| Shark | Hprof分析 | 内置于kshark包 |
+| Picocli | CLI框架 | 4.7.5 |
+| Okio | IO库 | 1.17.6 |
+| ImageIO | 图片处理 | JDK内置 |
 
 ## 开发说明
 
@@ -194,15 +294,67 @@ java -jar mem-monitor-1.0.0-all.jar watch -p com.koom.leak
 
 测试使用 `/home/dk/tmp/hprof/test.hprof` 作为样例数据。
 
+## Android 14+ Bitmap提取说明
+
+Android 14 (API 34) 引入了新的dumpheap选项：
+
+```bash
+adb shell am dumpheap -b png <package> /sdcard/heap.hprof
+```
+
+此选项会将Bitmap的压缩图片数据（PNG/JPEG/WEBP）包含在hprof文件的`Bitmap.dumpData`静态字段中，工具会自动读取并解码这些数据。
+
+对于不支持该选项的系统，工具会：
+1. 尝试读取Java堆中的Bitmap mBuffer字段
+2. 如果数据在native内存中，创建占位图记录尺寸和配置信息
+
+## 常见问题
+
+### Q: ADB连接失败
+```
+确保：
+1. 设备已通过USB连接
+2. 已开启USB调试模式
+3. 已授权此电脑进行调试
+```
+
+### Q: Monkey测试时应用崩溃
+```
+检查应用是否已启动：
+adb shell pm list packages | grep <package_name>
+```
+
+### Q: Watch监控不触发dump
+```
+检查阈值是否设置过高，建议：
+- heap-threshold: 80-200 MB
+- thread-threshold: 150-300
+- fd-threshold: 200-500
+```
+
+### Q: Bitmap提取为空图片
+```
+可能原因：
+1. Bitmap数据在native内存中，工具会创建占位图
+2. 确保使用 `am dumpheap -b png` 获取hprof（Android 14+）
+```
+
 ## 版本历史
 
-### v1.0.0
+### v1.0.0 (2025-01-20)
 - 初始版本
 - 支持hprof离线分析
 - 支持Bitmap提取和重复检测
 - 支持实时监控和watch功能
 - 支持Android 14+ dumpData
+- 添加Bitmap泄露测试APK
+- 添加Monkey测试脚本
 
 ## License
 
 Apache License 2.0
+
+## 致谢
+
+- [Square Shark](https://square.github.io/shark/) - Hprof分析库
+- [Picocli](https://picocli.info/) - CLI框架

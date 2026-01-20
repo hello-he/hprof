@@ -35,6 +35,9 @@ data class MonitorConfig(
     /** 是否检测重复Bitmap */
     val detectDuplicates: Boolean = true,
 
+    /** 是否检测重复线程名字 (线程泄露) */
+    val detectDuplicateThreads: Boolean = true,
+
     /** 是否自动dump (超阈值时) */
     val autoDump: Boolean = true,
 

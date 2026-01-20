@@ -3,6 +3,26 @@ package com.koom.monitor.model
 import java.time.Instant
 
 /**
+ * 线程信息
+ */
+data class ThreadInfo(
+    val tid: Int,
+    val name: String
+)
+
+/**
+ * 重复的线程名字信息
+ */
+data class DuplicateThreadInfo(
+    val name: String,
+    val count: Int,
+    val tids: List<Int>
+) {
+    val description: String
+        get() = "$name (x$count)"
+}
+
+/**
  * 指标快照
  */
 data class MetricsSnapshot(
@@ -31,7 +51,13 @@ data class MetricsSnapshot(
     val vss: Long? = null,
 
     /** RSS (Resident Set Size) */
-    val rss: Long? = null
+    val rss: Long? = null,
+
+    /** 线程信息列表 */
+    val threads: List<ThreadInfo> = emptyList(),
+
+    /** 重复的线程名字 */
+    val duplicateThreads: List<DuplicateThreadInfo> = emptyList()
 ) {
     /**
      * 堆内存使用率
@@ -52,12 +78,25 @@ data class MetricsSnapshot(
         get() = "${formatBytes(heapUsed)} / ${formatBytes(heapMax)} ($heapUsagePercent%)"
 
     /**
-     * 是否超过配置的阈值
+     * 是否有重复的线程名字
+     */
+    val hasDuplicateThreads: Boolean
+        get() = duplicateThreads.isNotEmpty()
+
+    /**
+     * 重复线程总数
+     */
+    val totalDuplicateThreadCount: Int
+        get() = duplicateThreads.sumOf { it.count - 1 }
+
+    /**
+     * 是否超过配置的阈值 (包括线程泄露)
      */
     fun isOverThreshold(config: MonitorConfig): Boolean {
         return heapUsed >= heapMax * config.heapThreshold
                 || threadCount >= config.threadThreshold
                 || fdCount >= config.fdThreshold
+                || (hasDuplicateThreads && config.detectDuplicateThreads)
     }
 
     /**
@@ -78,7 +117,43 @@ data class MetricsSnapshot(
             reasons.add("文件句柄数 $fdCount >= ${config.fdThreshold}")
         }
 
+        if (hasDuplicateThreads && config.detectDuplicateThreads) {
+            val dupInfo = duplicateThreads.take(3).joinToString(", ") { it.description }
+            val more = if (duplicateThreads.size > 3) "..." else ""
+            reasons.add("线程名字重复: $dupInfo$more")
+        }
+
         return reasons
+    }
+
+    /**
+     * 是否有线程泄露 (重复名字的线程)
+     */
+    fun hasThreadLeak(): Boolean {
+        return hasDuplicateThreads
+    }
+
+    /**
+     * 获取线程泄露描述
+     */
+    fun getThreadLeakDescription(): String {
+        if (!hasDuplicateThreads) return "无"
+
+        val topDuplicates = duplicateThreads
+            .sortedByDescending { it.count }
+            .take(5)
+
+        val sb = StringBuilder()
+        sb.append("发现 ${duplicateThreads.size} 种重复线程名:\n")
+        topDuplicates.forEach { dup ->
+            sb.append("  - ${dup.name}: ${dup.count} 个线程 (TIDs: ${dup.tids.take(5).joinToString(", ")}")
+            if (dup.tids.size > 5) sb.append("...")
+            sb.append(")\n")
+        }
+        if (duplicateThreads.size > 5) {
+            sb.append("  ... 还有 ${duplicateThreads.size - 5} 种\n")
+        }
+        return sb.toString().trim()
     }
 
     private fun formatBytes(bytes: Long): String {
@@ -108,5 +183,24 @@ data class MetricsSnapshot(
             fdCountDelta = fdCount - other.fdCount,
             durationMs = duration
         )
+    }
+
+    companion object {
+        /**
+         * 分析线程列表，找出重复的线程名字
+         */
+        fun analyzeThreads(threads: List<ThreadInfo>): List<DuplicateThreadInfo> {
+            val nameToTids = threads.groupBy { it.name }
+            return nameToTids
+                .filter { it.value.size > 1 }
+                .map { (name, threadInfos) ->
+                    DuplicateThreadInfo(
+                        name = name,
+                        count = threadInfos.size,
+                        tids = threadInfos.map { it.tid }.sorted()
+                    )
+                }
+                .sortedByDescending { it.count }
+        }
     }
 }

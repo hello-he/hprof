@@ -1,6 +1,8 @@
 package com.koom.monitor.adb
 
 import com.koom.monitor.model.MetricsSnapshot
+import com.koom.monitor.model.ThreadInfo as ModelThreadInfo
+import com.koom.monitor.model.DuplicateThreadInfo
 import kotlinx.coroutines.delay
 import org.slf4j.LoggerFactory
 import java.io.BufferedReader
@@ -173,6 +175,26 @@ class AdbClient(
     }
 
     /**
+     * 获取线程信息列表 (包括线程ID和名字)
+     */
+    fun getThreads(pid: Int): List<ThreadInfo> {
+        val result = shell("ls /proc/$pid/task 2>/dev/null")
+        if (result.exitCode != 0) {
+            return emptyList()
+        }
+
+        return result.output.lines()
+            .filter { it.isNotBlank() }
+            .mapNotNull { tid ->
+                val tidNum = tid.toIntOrNull() ?: return@mapNotNull null
+                // 读取线程名从 /proc/[pid]/task/[tid]/comm
+                val commResult = shell("cat /proc/$pid/task/$tid/comm 2>/dev/null")
+                val name = commResult.output.trim().takeIf { it.isNotBlank() } ?: "unknown"
+                ThreadInfo(tid = tidNum, name = name)
+            }
+    }
+
+    /**
      * 获取文件句柄数
      */
     fun getFdCount(pid: Int): Int {
@@ -189,6 +211,13 @@ class AdbClient(
         val threadCount = getThreadCount(pid)
         val fdCount = getFdCount(pid)
 
+        // 获取线程信息
+        val threads = getThreads(pid)
+        val threadInfos = threads.map { ModelThreadInfo(it.tid, it.name) }
+
+        // 分析重复的线程名字
+        val duplicateThreads = MetricsSnapshot.analyzeThreads(threadInfos)
+
         return MetricsSnapshot(
             timestamp = Instant.now(),
             packageName = packageName,
@@ -198,7 +227,9 @@ class AdbClient(
             threadCount = threadCount,
             fdCount = fdCount,
             vss = memInfo.vss,
-            rss = memInfo.rss
+            rss = memInfo.rss,
+            threads = threadInfos,
+            duplicateThreads = duplicateThreads
         )
     }
 
@@ -288,6 +319,14 @@ class AdbClient(
         val heapMax: Long,
         val vss: Long?,
         val rss: Long?
+    )
+
+    /**
+     * 线程信息
+     */
+    data class ThreadInfo(
+        val tid: Int,
+        val name: String
     )
 
     companion object {

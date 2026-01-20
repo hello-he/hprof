@@ -161,6 +161,12 @@ class ScanCommand : Runnable {
 
         snapshot.vss?.let { println("   VSS: ${it / 1024 / 1024} MB") }
         snapshot.rss?.let { println("   RSS: ${it / 1024 / 1024} MB") }
+
+        // 显示重复线程信息
+        if (snapshot.hasDuplicateThreads) {
+            println("   🚨 线程泄露检测:")
+            println("      ${snapshot.getThreadLeakDescription().replace("\n", "\n      ")}")
+        }
     }
 
     private fun printSummary(results: List<ScanResult>, config: MonitorConfig) {

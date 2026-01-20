@@ -169,6 +169,13 @@ class WatchCommand : Runnable {
 
                 println(prefix)
 
+                // 显示线程泄露信息
+                if (snapshot.hasDuplicateThreads && config.detectDuplicateThreads) {
+                    val dupCount = snapshot.duplicateThreads.size
+                    val dupThreads = snapshot.duplicateThreads.take(3).joinToString(", ") { it.description }
+                    println("   🚨 线程泄露: $dupCount 种重复线程名 ($dupThreads)")
+                }
+
                 if (snapshot.isOverThreshold(config)) {
                     val reasons = snapshot.getOverThresholdReasons(config)
                     println("   ⚠️  超过阈值: ${reasons.joinToString(", ")}")

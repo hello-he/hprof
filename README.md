@@ -2,6 +2,8 @@
 
 Android内存监控工具，通过ADB shell监控Android应用的内存、线程、文件句柄，并支持自动dump和Bitmap提取分析。
 
+> 📖 **新手必读：** 想了解什么是内存泄露？查看 [内存泄露详解 (MEMORY_LEAK.md)](MEMORY_LEAK.md)
+
 ## 功能特性
 
 ### 1. 离线Hprof分析 (`analyze`)
@@ -179,19 +181,54 @@ reports/
 - 🖼️ 所有Bitmap画廊
 - 🔄 重复Bitmap组（SHA-256哈希、内存浪费统计）
 
-## Bitmap测试Demo
+## 内存泄露测试Demo
 
 ### 功能
 
-`demo/` 目录包含一个独立的Android测试APK，专门用于测试Bitmap内存泄漏：
+`demo/` 目录包含一个独立的Android测试APK，涵盖多种常见的Android内存泄露场景：
 
-- **创建Bitmap泄露 (1440x3200)**: 创建常见手机分辨率的大Bitmap
-- **创建10个Bitmap泄露**: 批量创建FHD分辨率Bitmap
-- **创建超大Bitmap (2560x2560)**: 创建超大Bitmap测试极端情况
+#### 📸 Bitmap内存泄露
+- **Bitmap泄露 (1440x3200)**: 创建常见手机分辨率的大Bitmap (~18MB)
+- **Bitmap泄露 (1920x1080) x10**: 批量创建FHD分辨率Bitmap (~80MB)
+- **Bitmap泄露 (2560x2560)**: 创建超大Bitmap测试极端情况 (~26MB)
+
+#### 📦 基础数据类型泄露
+- **ByteArray泄露 (1MB x50)**: 创建50个1MB字节数组 (50MB)
+- **String泄露 (1MB x50)**: 创建大字符串对象 (~1MB)
+- **IntArray泄露 (4MB x10)**: 创建整数数组泄露 (40MB)
+- **LongArray泄露 (8MB x10)**: 创建长整数数组泄露 (80MB)
+
+#### 🧵 线程相关泄露
+- **Thread泄露 (10个长期运行线程)**: 创建持续运行的线程
+- **Runnable泄露 (Handler持有)**: Handler持有Activity引用的Runnable
+- **Timer泄露 (未取消)**: Timer未正确取消导致的泄露
+
+#### 🏠 Activity/Context泄露
+- **静态Activity引用泄露**: 静态集合持有Activity引用
+- **Context泄露 (单例持有)**: 单例模式持有Context引用
+
+#### 🔧 内部类泄露
+- **非静态内部类泄露**: 非静态内部类持有外部类引用
+- **匿名内部类泄露**: 匿名内部类持有外部类引用
+
+#### 🔌 资源泄露
+- **InputStream泄露 (未关闭)**: 打开流但未关闭
+- **Drawable泄露 (静态引用)**: Drawable持有View引用
+
+#### 📚 集合泄露
+- **ArrayList对象泄露**: 集合中添加大量对象
+- **静态集合对象泄露**: 静态集合持续增长
+
+#### 🔄 循环引用泄露
+- **双向引用循环泄露**: 对象之间互相引用导致的无法GC
+
+#### 🔥 自动模式
+- **自动泄露**: 自动循环制造各种类型的泄露 (每2秒一次)
 
 界面实时显示：
-- 已泄露Bitmap数量
-- 总占用内存(MB)
+- 已泄露对象数量统计
+- 各类型内存占用(MB)
+- JVM内存使用情况
 
 ### 构建
 
@@ -341,13 +378,22 @@ adb shell pm list packages | grep <package_name>
 
 ## 版本历史
 
+### v1.1.0 (2025-01-20)
+- 扩展Demo APK，新增20+种内存泄露类型
+- 支持Activity/Context泄露测试
+- 支持线程/Runnable/Timer泄露测试
+- 支持内部类/匿名内部类泄露测试
+- 支持资源(InputStream/Drawable)泄露测试
+- 支持集合/循环引用泄露测试
+- 支持自动循环泄露模式
+
 ### v1.0.0 (2025-01-20)
 - 初始版本
 - 支持hprof离线分析
 - 支持Bitmap提取和重复检测
 - 支持实时监控和watch功能
 - 支持Android 14+ dumpData
-- 添加Bitmap泄露测试APK
+- 添加基础Bitmap泄露测试APK
 - 添加Monkey测试脚本
 
 ## License

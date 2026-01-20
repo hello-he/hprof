@@ -2,6 +2,27 @@
 
 快速监控和分析Android应用的内存问题。
 
+## Demo APK 支持的泄露类型
+
+| 分类 | 泄露类型 | 内存占用 |
+|------|---------|---------|
+| 📸 Bitmap | 1440x3200 Bitmap | ~18MB |
+| 📸 Bitmap | 1920x1080 x10 | ~80MB |
+| 📸 Bitmap | 2560x2560 超大 | ~26MB |
+| 📦 ByteArray | 1MB x50 | 50MB |
+| 📦 String | 1MB | ~1MB |
+| 📦 IntArray | 4MB x10 | 40MB |
+| 📦 LongArray | 8MB x10 | 80MB |
+| 🧵 Thread | 10个长期线程 | 持续增长 |
+| 🧵 Runnable | Handler持有 | 延迟释放 |
+| 🧵 Timer | 未取消 | 持续运行 |
+| 🏠 Activity | 静态引用 | 无法GC |
+| 🏠 Context | 单例持有 | 无法GC |
+| 🔧 内部类 | 非静态/匿名 | 持有外部引用 |
+| 🔌 资源 | InputStream/Drawable | 未关闭 |
+| 📚 集合 | ArrayList/静态集合 | 持续增长 |
+| 🔄 循环引用 | 双向引用 | 无法GC |
+
 ## 一分钟快速开始
 
 ### 1. 构建工具

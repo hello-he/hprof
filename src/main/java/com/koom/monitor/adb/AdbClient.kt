@@ -204,12 +204,14 @@ class AdbClient(
 
     /**
      * 执行dump heap
+     * @param includeBitmaps 是否包含Bitmap数据 (Android 14+, 使用 -b png)
      */
-    fun dumpHeap(packageName: String, outputPath: String): ProcessResult {
+    fun dumpHeap(packageName: String, outputPath: String, includeBitmaps: Boolean = true): ProcessResult {
         // 确保输出目录存在
         shell("mkdir -p ${outputPath.substringBeforeLast('/')}")
 
-        val cmd = "am dumpheap $packageName $outputPath"
+        val bitmapOption = if (includeBitmaps) "-b png " else ""
+        val cmd = "am dumpheap $bitmapOption$packageName $outputPath"
         logger.info("执行: $cmd")
         return shell(cmd)
     }

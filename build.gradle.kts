@@ -66,5 +66,7 @@ tasks {
             attributes("Main-Class" to "com.koom.monitor.MainKt")
         }
         mergeServiceFiles()
+        // 构建JAR前先运行测试
+        dependsOn("test")
     }
 }

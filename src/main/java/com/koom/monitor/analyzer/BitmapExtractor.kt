@@ -1038,11 +1038,21 @@ class BitmapExtractor {
             )
 
             if (analysis is kshark.HeapAnalysisSuccess) {
-                // 获取第一个泄露的trace
+                // 尝试从applicationLeaks获取
                 val leakTrace = analysis.applicationLeaks.firstOrNull()?.leakTraces?.firstOrNull()
                 if (leakTrace != null) {
                     result.addAll(buildReferenceChain(leakTrace.referencePath))
+                } else {
+                    // 尝试从libraryLeaks获取
+                    val libLeakTrace = analysis.libraryLeaks.firstOrNull()?.leakTraces?.firstOrNull()
+                    if (libLeakTrace != null) {
+                        result.addAll(buildReferenceChain(libLeakTrace.referencePath))
+                    } else {
+                        logger.debug("未找到Bitmap $bitmapObjectId 的引用链 (applicationLeaks=${analysis.applicationLeaks.size}, libraryLeaks=${analysis.libraryLeaks.size})")
+                    }
                 }
+            } else {
+                logger.warn("Bitmap $bitmapObjectId 分析失败")
             }
         } catch (e: Exception) {
             logger.warn("查找引用链失败: $bitmapObjectId, ${e.message}")

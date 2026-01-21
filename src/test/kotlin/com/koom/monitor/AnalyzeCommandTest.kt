@@ -87,8 +87,9 @@ class AnalyzeCommandTest {
             assertTrue("HTML应该包含Bitmap统计", htmlContent.contains("Bitmap 统计"))
 
             if (bitmapDir != null) {
-                assertTrue("HTML应该包含bitmap目录路径",
-                    htmlContent.contains(bitmapDir.toAbsolutePath().toString()))
+                // HTML应该包含bitmap目录名称（相对路径，不是绝对路径）
+                assertTrue("HTML应该包含bitmap目录名称",
+                    htmlContent.contains(bitmapDir.fileName.toString()))
             }
         }
     }

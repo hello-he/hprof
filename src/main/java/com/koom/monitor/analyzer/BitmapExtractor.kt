@@ -19,6 +19,10 @@ import javax.imageio.ImageIO
 
 /**
  * Bitmap提取器 - 从hprof中提取Bitmap像素数据并保存为PNG
+ *
+ * 报告逻辑：
+ * - bitmap_analysis.html: 报告所有大Bitmap和重复Bitmap（无论是否泄露）
+ * - hprof_analysis.html: 由HprofAnalyzer生成，报告有GC Root泄露路径的对象
  */
 class BitmapExtractor {
 
@@ -26,7 +30,7 @@ class BitmapExtractor {
 
     companion object {
         private const val BITMAP_CLASS_NAME = "android.graphics.Bitmap"
-        private const val DEFAULT_BIG_BITMAP = 768 * 1366 + 1
+        private const val LARGE_BITMAP_THRESHOLD = 768 * 1366 + 1  // 约1M像素
 
         // Bitmap Config 常量
         private const val ALPHA_8 = 0
@@ -48,7 +52,7 @@ class BitmapExtractor {
         val byteCount: Int = pixelCount * 4,  // 默认按ARGB_8888计算
         val imageHash: String? = null,
         val hasData: Boolean = false,
-        val isLarge: Boolean = pixelCount >= DEFAULT_BIG_BITMAP
+        val isLarge: Boolean = pixelCount >= LARGE_BITMAP_THRESHOLD
     )
 
     /**
@@ -66,6 +70,9 @@ class BitmapExtractor {
 
     /**
      * 从hprof文件提取Bitmap
+     *
+     * 注意: 这里提取的是所有大Bitmap，不限于泄露的Bitmap
+     * 泄露检测由HprofAnalyzer负责
      */
     fun extract(
         hprofFile: File,
@@ -128,7 +135,7 @@ class BitmapExtractor {
                     pixelCount = pixelCount,
                     config = configName,
                     configValue = configValue,
-                    isLarge = pixelCount >= DEFAULT_BIG_BITMAP
+                    isLarge = pixelCount >= LARGE_BITMAP_THRESHOLD
                 )
 
                 allBitmaps.add(bitmapInfo)
@@ -136,8 +143,10 @@ class BitmapExtractor {
                     largeBitmaps.add(bitmapInfo)
                 }
 
-                // 只处理大Bitmap或全部Bitmap
-                if (!largeOnly || bitmapInfo.isLarge) {
+                // 根据参数决定处理哪些Bitmap
+                val shouldProcess = if (largeOnly) bitmapInfo.isLarge else true
+
+                if (shouldProcess) {
                     // 提取像素数据 - 优先使用 Android 14+ dumpData 中的压缩数据
                     val imageData = extractBitmapPixels(graph, instance, width, height, configValue, dumpDataMap, nativePtr)
 
@@ -159,7 +168,6 @@ class BitmapExtractor {
                         logger.debug("提取Bitmap: ${width}x${height} hash=${hash.take(16)}")
                     } else if (extractImages) {
                         // 像素数据在native内存中，创建占位图
-                        // 使用尺寸、配置等信息生成哈希，用于检测相同尺寸的Bitmap
                         val metadataHash = calculateMetadataHash(width, height, configValue)
 
                         // 创建占位图
@@ -615,78 +623,6 @@ class BitmapExtractor {
     }
 
     /**
-     * 尝试直接从hprof文件读取原始字节数据
-     */
-    private fun extractBitmapFromHprofFile(
-        hprofFile: File,
-        outputDir: Path,
-        bitmapInfos: List<BitmapInfo>
-    ): List<Path> {
-        val extractedFiles = mutableListOf<Path>()
-
-        // 由于直接解析hprof二进制格式非常复杂，
-        // 这里使用KOOM的方法获取数据
-        // 作为简化，我们先创建占位图片
-
-        bitmapInfos.forEach { bitmap ->
-            val outputFile = outputDir.resolve("bitmap_${bitmap.objectId}_${bitmap.width}x${bitmap.height}.png")
-
-            // 创建一个渐变色占位图
-            val image = BufferedImage(bitmap.width, bitmap.height, BufferedImage.TYPE_INT_ARGB)
-            val g = image.createGraphics()
-
-            // 绘制渐变背景
-            val gradient = java.awt.GradientPaint(
-                0f, 0f, java.awt.Color(0x667eea),
-                bitmap.width.toFloat(), bitmap.height.toFloat(), java.awt.Color(0x764ba2)
-            )
-            g.paint = gradient
-            g.fillRect(0, 0, bitmap.width, bitmap.height)
-
-            // 绘制信息文本
-            g.paint = java.awt.Color.WHITE
-            g.font = java.awt.Font("Arial", java.awt.Font.BOLD, 12)
-            g.drawString("${bitmap.width}x${bitmap.height}", 10, bitmap.height / 2 - 10)
-            g.drawString(bitmap.config, 10, bitmap.height / 2 + 10)
-
-            g.dispose()
-
-            ImageIO.write(image, "PNG", outputFile.toFile())
-            extractedFiles.add(outputFile)
-        }
-
-        return extractedFiles
-    }
-
-    /**
-     * 使用HeapGraph读取byte array的原始数据
-     * 这是一个深度读取操作，需要直接解析hprof二进制
-     */
-    private fun readByteArrayFromHeapGraph(
-        graph: HeapGraph,
-        arrayInstance: HeapPrimitiveArray
-    ): ByteArray? {
-        try {
-            // 获取数组类型和长度
-            val type = arrayInstance.primitiveType
-            val record = arrayInstance.readRecord()
-            val size = record.size
-
-            // 使用Shark的内部API读取原始字节
-            // 这需要访问HprofInMemoryIndex和HprofRecordReader
-            logger.debug("读取byte数组: type=${type.name}, size=$size")
-
-            // 由于Shark不直接暴露字节数组的读取方法，
-            // 我们需要通过record读取
-            // 这里暂时返回null
-
-        } catch (e: Exception) {
-            logger.warn("读取byte数组失败: ${e.message}")
-        }
-        return null
-    }
-
-    /**
      * 计算数据的哈希值
      */
     private fun calculateHash(data: ByteArray): String {
@@ -737,16 +673,16 @@ class BitmapExtractor {
     }
 
     /**
-     * 生成提取报告
+     * 生成提取报告（文本）
      */
     fun generateReport(result: ExtractionResult): String {
         val sb = StringBuilder()
         sb.appendLine("\n╔══════════════════════════════════════════════════════════════╗")
-        sb.appendLine("║                    Bitmap 提取报告                            ║")
+        sb.appendLine("║                    Bitmap 分析报告                            ║")
         sb.appendLine("╚══════════════════════════════════════════════════════════════╝")
         sb.appendLine()
         sb.appendLine("📊 统计信息")
-        sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         sb.appendLine("   总Bitmap数: ${result.totalBitmaps}")
         sb.appendLine("   大Bitmap数(>1M像素): ${result.largeBitmaps}")
         sb.appendLine("   已提取: ${result.extractedBitmaps}")
@@ -789,7 +725,10 @@ class BitmapExtractor {
     }
 
     /**
-     * 生成HTML报告
+     * 生成HTML报告 - bitmap_analysis.html
+     *
+     * 此报告专注于Bitmap分析，包含所有大Bitmap和重复Bitmap
+     * 无论这些Bitmap是否是泄露的都会在此报告中显示
      */
     fun generateHtmlReport(result: ExtractionResult): String {
         val sb = StringBuilder()
@@ -804,8 +743,13 @@ class BitmapExtractor {
         sb.appendLine("        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }")
         sb.appendLine("        .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }")
         sb.appendLine("        .header { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 30px; border-radius: 8px 8px 0 0; }")
+        sb.appendLine("        .header h1 { font-size: 24px; margin-bottom: 10px; }")
+        sb.appendLine("        .header .subtitle { opacity: 0.9; font-size: 14px; }")
         sb.appendLine("        .section { padding: 25px; border-bottom: 1px solid #eee; }")
-        sb.appendLine("        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }")
+        sb.appendLine("        .section:last-child { border-bottom: none; }")
+        sb.appendLine("        .section-title { font-size: 18px; font-weight: 600; color: #333; margin-bottom: 20px; display: flex; align-items: center; }")
+        sb.appendLine("        .section-title .icon { margin-right: 10px; font-size: 20px; }")
+        sb.appendLine("        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }")
         sb.appendLine("        .stat-card { background: #f8f9fa; padding: 15px; border-radius: 6px; border-left: 4px solid #f5576c; }")
         sb.appendLine("        .stat-card .label { font-size: 12px; color: #666; margin-bottom: 5px; }")
         sb.appendLine("        .stat-card .value { font-size: 24px; font-weight: 700; color: #333; }")
@@ -814,38 +758,52 @@ class BitmapExtractor {
         sb.appendLine("        .bitmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin-top: 15px; }")
         sb.appendLine("        .bitmap-item { background: white; border-radius: 4px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }")
         sb.appendLine("        .bitmap-item img { max-width: 100%; max-height: 80px; object-fit: contain; display: block; margin: 0 auto; }")
-        sb.appendLine("        .bitmap-info { padding: 10px; font-size: 12px; color: #666; }")
+        sb.appendLine("        .bitmap-info { padding: 10px; font-size: 12px; color: #666; text-align: center; }")
         sb.appendLine("        .warning { background: #ffebee; border-left: 4px solid #f44336; padding: 15px; border-radius: 6px; margin: 15px 0; }")
+        sb.appendLine("        .warning .title { font-weight: 600; color: #c62828; margin-bottom: 10px; }")
         sb.appendLine("        .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin-top: 20px; }")
         sb.appendLine("        .gallery-item { position: relative; height: 120px; display: flex; align-items: center; justify-content: center; background: #f5f5f5; border-radius: 4px; overflow: hidden; }")
         sb.appendLine("        .gallery-item img { max-width: 100%; max-height: 100px; object-fit: contain; border-radius: 4px; }")
         sb.appendLine("        .gallery-item .overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: white; padding: 5px; font-size: 11px; border-radius: 0 0 4px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }")
+        sb.appendLine("        .info-note { background: #e3f2fd; padding: 15px; border-radius: 6px; margin: 15px 0; font-size: 13px; }")
+        sb.appendLine("        .info-note .title { font-weight: 600; color: #1976d2; margin-bottom: 5px; }")
+        sb.appendLine("        .info-note .link { color: #1976d2; text-decoration: none; }")
         sb.appendLine("    </style>")
         sb.appendLine("</head>")
         sb.appendLine("<body>")
         sb.appendLine("    <div class=\"container\">")
         sb.appendLine("        <div class=\"header\">")
-        sb.appendLine("            <h1>🖼️ Bitmap 泄漏分析报告</h1>")
-        sb.appendLine("            <p>检测重复Bitmap和内存占用</p>")
+        sb.appendLine("            <h1>🖼️ Bitmap 分析报告</h1>")
+        sb.appendLine("            <div class=\"subtitle\">所有大Bitmap和重复Bitmap分析 (不限于泄露对象)</div>")
         sb.appendLine("        </div>")
 
         sb.appendLine("        <div class=\"section\">")
-        sb.appendLine("            <h2>统计信息</h2>")
-        sb.appendLine("            <div class=\"stat-grid\">")
+        sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📊</span>统计信息</div>")
+        sb.appendLine("            <div class=\"stats-grid\">")
         sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">总Bitmap数</div><div class=\"value\">${result.totalBitmaps}</div></div>")
         sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">大Bitmap(>1M像素)</div><div class=\"value\">${result.largeBitmaps}</div></div>")
         sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">已提取</div><div class=\"value\">${result.extractedBitmaps}</div></div>")
         sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">重复组数</div><div class=\"value\">${result.duplicateGroups.size}</div></div>")
+        sb.appendLine("            </div>")
+
+        // 添加说明
+        sb.appendLine("            <div class=\"info-note\">")
+        sb.appendLine("                <div class=\"title\">📄 报告说明</div>")
+        sb.appendLine("                <div>此报告包含<strong>所有</strong>大Bitmap和重复Bitmap，无论它们是否泄露。</div>")
+        sb.appendLine("                <div style=\"margin-top: 5px;\">查看 <a href=\"hprof_analysis.html\" class=\"link\">hprof_analysis.html</a> 获取内存泄露分析报告。</div>")
         sb.appendLine("            </div>")
         sb.appendLine("        </div>")
 
         // 大Bitmap展示
         if (result.largeBitmaps > 0 && result.largeBitmapsList.isNotEmpty()) {
             sb.appendLine("        <div class=\"section\">")
-            sb.appendLine("            <h2>🔴 大Bitmap (>1M像素, ${result.largeBitmaps}张)</h2>")
-            sb.appendLine("            <div class=\"gallery\">")
+            sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🔴</span>大Bitmap (>1M像素, ${result.largeBitmaps}张)</div>")
 
-            result.largeBitmapsList.forEach { bitmap ->
+            // 按大小分组
+            val sortedBitmaps = result.largeBitmapsList.sortedByDescending { it.pixelCount }
+
+            sb.appendLine("            <div class=\"gallery\">")
+            sortedBitmaps.forEach { bitmap ->
                 val hash = bitmap.imageHash ?: "unknown"
                 val fileName = "bitmap_${bitmap.objectId}_${hash.take(8)}_${bitmap.width}x${bitmap.height}.png"
                 val file = result.outputDir.resolve(fileName)
@@ -857,18 +815,18 @@ class BitmapExtractor {
                     sb.appendLine("                </div>")
                 }
             }
-
             sb.appendLine("            </div>")
             sb.appendLine("        </div>")
         }
 
-        // 泄漏的Bitmap画廊
+        // 所有Bitmap画廊
         if (result.extractedBitmaps > 0) {
             sb.appendLine("        <div class=\"section\">")
-            sb.appendLine("            <h2>🖼️ 泄漏的Bitmap (${result.extractedBitmaps}张)</h2>")
+            sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🖼️</span>所有已提取Bitmap (${result.extractedBitmaps}张)</div>")
+
             sb.appendLine("            <div class=\"gallery\">")
 
-            // 按hash分组显示
+            // 按hash分组显示，每个hash只显示一个
             val seenHashes = mutableSetOf<String>()
             result.extractedFiles.forEach { filePath ->
                 val fileName = filePath.fileName.toString()
@@ -877,10 +835,11 @@ class BitmapExtractor {
                 val hash = hashMatch?.groupValues?.get(1) ?: ""
 
                 val isDuplicate = result.duplicateGroups.containsKey(hash) && seenHashes.add(hash).not()
+                val badge = if (isDuplicate) " 🔄" else ""
 
                 sb.appendLine("                <div class=\"gallery-item\">")
                 sb.appendLine("                    <img src=\"bitmaps/${fileName}\" alt=\"Bitmap\">")
-                sb.appendLine("                    <div class=\"overlay\">${fileName}</div>")
+                sb.appendLine("                    <div class=\"overlay\">${fileName}$badge</div>")
                 sb.appendLine("                </div>")
             }
 
@@ -888,9 +847,10 @@ class BitmapExtractor {
             sb.appendLine("        </div>")
         }
 
+        // 重复Bitmap组
         if (result.duplicateGroups.isNotEmpty()) {
             sb.appendLine("        <div class=\"section\">")
-            sb.appendLine("            <h2>🔄 重复的Bitmap (${result.duplicateGroups.size}组)</h2>")
+            sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🔄</span>重复的Bitmap (${result.duplicateGroups.size}组)</div>")
 
             var totalWaste = 0L
             result.duplicateGroups.forEach { (hash, bitmaps) ->
@@ -927,7 +887,8 @@ class BitmapExtractor {
 
             if (totalWaste > 0) {
                 sb.appendLine("        <div class=\"warning\">")
-                sb.appendLine("            <strong>⚠️ 内存浪费:</strong> 重复Bitmap导致约 ${formatSize(totalWaste)} 的内存浪费")
+                sb.appendLine("            <div class=\"title\">⚠️ 内存浪费:</div>")
+                sb.appendLine("            重复Bitmap导致约 ${formatSize(totalWaste)} 的内存浪费")
                 sb.appendLine("        </div>")
             }
         }

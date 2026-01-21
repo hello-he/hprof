@@ -1054,6 +1054,9 @@ class BitmapExtractor {
             )
 
             if (analysis is kshark.HeapAnalysisSuccess) {
+                // 检查是否在unreachableObjects中
+                val isUnreachable = analysis.unreachableObjects.any { it.objectId == bitmapObjectId }
+
                 // 尝试从applicationLeaks获取
                 val leakTrace = analysis.applicationLeaks.firstOrNull()?.leakTraces?.firstOrNull()
                 if (leakTrace != null) {
@@ -1064,7 +1067,11 @@ class BitmapExtractor {
                     if (libLeakTrace != null) {
                         result.addAll(buildReferenceChain(libLeakTrace.referencePath))
                     } else {
-                        logger.debug("未找到Bitmap $bitmapObjectId 的引用链 (applicationLeaks=${analysis.applicationLeaks.size}, libraryLeaks=${analysis.libraryLeaks.size})")
+                        if (isUnreachable) {
+                            logger.debug("Bitmap $bitmapObjectId 被归类为unreachable (无法从GC Root到达)")
+                        } else {
+                            logger.debug("未找到Bitmap $bitmapObjectId 的引用链 (applicationLeaks=${analysis.applicationLeaks.size}, libraryLeaks=${analysis.libraryLeaks.size}, unreachable=${analysis.unreachableObjects.size})")
+                        }
                     }
                 }
             } else {

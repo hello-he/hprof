@@ -156,8 +156,11 @@ class AnalyzeCommandTest {
 
         // 如果有大Bitmap，验证列表大小
         if (result.largeBitmaps > 0) {
-            assertEquals("大Bitmap列表大小应该匹配统计",
-                result.largeBitmaps, result.largeBitmapsList.size)
+            // 注意：largeBitmapsList 已去重，不包含重复的大Bitmap
+            // 重复的大Bitmap会在"重复的Bitmap" section中显示
+            assertTrue("去重后的大Bitmap列表大小应该≤总数",
+                result.largeBitmapsList.size <= result.largeBitmaps)
+            println("  大Bitmap总数: ${result.largeBitmaps}, 去重后显示: ${result.largeBitmapsList.size}")
         }
     }
 

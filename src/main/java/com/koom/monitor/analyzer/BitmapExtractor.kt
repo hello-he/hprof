@@ -204,8 +204,14 @@ class BitmapExtractor {
             // 从已提取的Bitmap中筛选大Bitmap（此时已有imageHash）
             val extractedLargeBitmaps = extracted.filter { it.isLarge }
 
-            // 为大Bitmap和重复Bitmap查找引用链
-            val bitmapsWithChains = findReferenceChains(graph, extractedLargeBitmaps, duplicates)
+            // 去重：从大Bitmap列表中排除重复的Bitmap
+            val duplicateBitmapIds = duplicates.values.flatten().map { it.objectId }.toSet()
+            val uniqueLargeBitmaps = extractedLargeBitmaps.filter { it.objectId !in duplicateBitmapIds }
+
+            logger.info("大Bitmap: ${extractedLargeBitmaps.size}, 去重后: ${uniqueLargeBitmaps.size}, 重复组: ${duplicates.size}")
+
+            // 为大Bitmap（仅非重复）和重复Bitmap查找引用链
+            val bitmapsWithChains = findReferenceChains(graph, uniqueLargeBitmaps, duplicates)
 
             val elapsed = System.currentTimeMillis() - startTime
             logger.info("提取完成: ${allBitmaps.size}个Bitmap, ${extracted.size}个已提取, 耗时${elapsed}ms")
@@ -213,7 +219,7 @@ class BitmapExtractor {
             return ExtractionResult(
                 totalBitmaps = allBitmaps.size,
                 largeBitmaps = largeBitmaps.size,
-                largeBitmapsList = bitmapsWithChains.first,  // 带引用链的大Bitmap列表
+                largeBitmapsList = bitmapsWithChains.first,  // 带引用链的非重复大Bitmap列表
                 extractedBitmaps = extracted.size,
                 duplicateGroups = bitmapsWithChains.second,  // 带引用链的重复Bitmap组
                 outputDir = outputDir,

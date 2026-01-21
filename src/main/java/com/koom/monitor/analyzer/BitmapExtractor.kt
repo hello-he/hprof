@@ -845,12 +845,20 @@ class BitmapExtractor {
                     sb.appendLine("                <div style=\"margin-top: 10px;\">")
                     sb.appendLine("                    <div style=\"font-size: 12px; font-weight: 600; color: #666; margin-bottom: 5px;\">引用链 (GC Root → Bitmap):</div>")
                     sb.appendLine("                    <div style=\"font-size: 11px; color: #888; line-height: 1.6;\">")
-                    bitmap.referenceChain.take(10).forEachIndexed { index, node ->
+
+                    // 对于短引用链（≤15个节点）全部显示，长引用链截断
+                    val displayLimit = if (bitmap.referenceChain.size <= 15) {
+                        bitmap.referenceChain.size
+                    } else {
+                        15
+                    }
+
+                    bitmap.referenceChain.take(displayLimit).forEachIndexed { index, node ->
                         val arrow = if (index < bitmap.referenceChain.size - 1) " → " else ""
                         sb.appendLine("                        ${node.fullName}$arrow<br>")
                     }
-                    if (bitmap.referenceChain.size > 10) {
-                        sb.appendLine("                        ... (还有${bitmap.referenceChain.size - 10}个节点)")
+                    if (bitmap.referenceChain.size > displayLimit) {
+                        sb.appendLine("                        ... (还有${bitmap.referenceChain.size - displayLimit}个节点)")
                     }
                     sb.appendLine("                    </div>")
                     sb.appendLine("                </div>")
@@ -899,12 +907,20 @@ class BitmapExtractor {
                     if (bitmap.referenceChain.isNotEmpty()) {
                         sb.appendLine("                    <div style=\"font-size: 11px; color: #666; background: #f5f5f5; padding: 8px; border-radius: 4px;\">")
                         sb.appendLine("                        <div style=\"font-weight: 600; margin-bottom: 4px;\">引用链:</div>")
-                        bitmap.referenceChain.take(8).forEachIndexed { index, node ->
+
+                        // 对于短引用链（≤15个节点）全部显示，长引用链截断
+                        val displayLimit = if (bitmap.referenceChain.size <= 15) {
+                            bitmap.referenceChain.size
+                        } else {
+                            15
+                        }
+
+                        bitmap.referenceChain.take(displayLimit).forEachIndexed { index, node ->
                             val arrow = if (index < bitmap.referenceChain.size - 1) " → " else ""
                             sb.appendLine("                        ${node.fullName}$arrow<br>")
                         }
-                        if (bitmap.referenceChain.size > 8) {
-                            sb.appendLine("                        ... (还有${bitmap.referenceChain.size - 8}个)")
+                        if (bitmap.referenceChain.size > displayLimit) {
+                            sb.appendLine("                        ... (还有${bitmap.referenceChain.size - displayLimit}个)")
                         }
                         sb.appendLine("                    </div>")
                     }

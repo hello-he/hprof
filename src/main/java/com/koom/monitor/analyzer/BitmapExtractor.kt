@@ -865,8 +865,8 @@ class BitmapExtractor {
                 } else {
                     // 标注：无法从GC Root到达
                     sb.appendLine("                <div style=\"margin-top: 10px;\">")
-                    sb.appendLine("                    <div style=\"font-size: 12px; font-weight: 600; color: #d32f2f; margin-bottom: 5px;\">⚠️ 无法从GC Root到达</div>")
-                    sb.appendLine("                    <div style=\"font-size: 11px; color: #c62828; background: #ffebee; padding: 10px; border-radius: 4px; border-left: 3px solid #f44336;\">")
+                    sb.appendLine("                    <div style=\"font-size: 12px; font-weight: 600; color: #e65100; margin-bottom: 5px;\">⚠️ 无法从GC Root到达</div>")
+                    sb.appendLine("                    <div style=\"font-size: 11px; color: #bf360c; background: #fff3e0; padding: 10px; border-radius: 4px; border-left: 3px solid #ffa000;\">")
                     sb.appendLine("                        <div style=\"margin-bottom: 4px;\">此Bitmap无法通过已知的引用路径从GC Root到达，可能被系统缓存持有。</div>")
                     sb.appendLine("                        <div style=\"font-size: 10px; color: #666;\">Shark过滤掉了已知的\"正常持有\"引用（如系统缓存），以避免误报。</div>")
                     sb.appendLine("                    </div>")
@@ -934,8 +934,8 @@ class BitmapExtractor {
                         sb.appendLine("                    </div>")
                     } else {
                         // 标注：无法从GC Root到达
-                        sb.appendLine("                    <div style=\"font-size: 11px; color: #d32f2f; background: #ffebee; padding: 8px; border-radius: 4px; border-left: 3px solid #f44336;\">")
-                        sb.appendLine("                        <div style=\"font-weight: 600; margin-bottom: 2px;\">⚠️ 无法从GC Root到达</div>")
+                        sb.appendLine("                    <div style=\"font-size: 11px; color: #bf360c; background: #fff3e0; padding: 8px; border-radius: 4px; border-left: 3px solid #ffa000;\">")
+                        sb.appendLine("                        <div style=\"font-weight: 600; margin-bottom: 2px; color: #e65100;\">⚠️ 无法从GC Root到达</div>")
                         sb.appendLine("                        <div>此Bitmap无法通过已知的引用路径从GC Root到达，可能被系统缓存持有。</div>")
                         sb.appendLine("                        <div style=\"margin-top: 4px; font-size: 10px; color: #666;\">Shark过滤掉了已知的\"正常持有\"引用（如系统缓存），以避免误报。</div>")
                         sb.appendLine("                    </div>")

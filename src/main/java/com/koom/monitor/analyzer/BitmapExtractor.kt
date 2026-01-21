@@ -40,6 +40,15 @@ class BitmapExtractor {
     }
 
     /**
+     * 引用链节点
+     */
+    data class ReferenceNode(
+        val className: String,
+        val fieldName: String? = null,
+        val fullName: String = if (fieldName != null) "$className.$fieldName" else className
+    )
+
+    /**
      * Bitmap信息
      */
     data class BitmapInfo(
@@ -52,7 +61,8 @@ class BitmapExtractor {
         val byteCount: Int = pixelCount * 4,  // 默认按ARGB_8888计算
         val imageHash: String? = null,
         val hasData: Boolean = false,
-        val isLarge: Boolean = pixelCount >= LARGE_BITMAP_THRESHOLD
+        val isLarge: Boolean = pixelCount >= LARGE_BITMAP_THRESHOLD,
+        val referenceChain: List<ReferenceNode> = emptyList()  // 到GC Root的引用链
     )
 
     /**
@@ -194,15 +204,18 @@ class BitmapExtractor {
             // 从已提取的Bitmap中筛选大Bitmap（此时已有imageHash）
             val extractedLargeBitmaps = extracted.filter { it.isLarge }
 
+            // 为大Bitmap和重复Bitmap查找引用链
+            val bitmapsWithChains = findReferenceChains(graph, extractedLargeBitmaps, duplicates)
+
             val elapsed = System.currentTimeMillis() - startTime
             logger.info("提取完成: ${allBitmaps.size}个Bitmap, ${extracted.size}个已提取, 耗时${elapsed}ms")
 
             return ExtractionResult(
                 totalBitmaps = allBitmaps.size,
                 largeBitmaps = largeBitmaps.size,
-                largeBitmapsList = extractedLargeBitmaps,
+                largeBitmapsList = bitmapsWithChains.first,  // 带引用链的大Bitmap列表
                 extractedBitmaps = extracted.size,
-                duplicateGroups = duplicates,
+                duplicateGroups = bitmapsWithChains.second,  // 带引用链的重复Bitmap组
                 outputDir = outputDir,
                 extractedFiles = extractedFiles
             )
@@ -802,24 +815,111 @@ class BitmapExtractor {
             // 按大小分组
             val sortedBitmaps = result.largeBitmapsList.sortedByDescending { it.pixelCount }
 
-            sb.appendLine("            <div class=\"gallery\">")
             sortedBitmaps.forEach { bitmap ->
                 val hash = bitmap.imageHash ?: "unknown"
                 val fileName = "bitmap_${bitmap.objectId}_${hash.take(8)}_${bitmap.width}x${bitmap.height}.png"
                 val file = result.outputDir.resolve(fileName)
+                val sizeMB = String.format("%.2f", bitmap.pixelCount * 4.0 / (1024 * 1024))
+
+                sb.appendLine("            <div style=\"margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;\">")
+
+                // 显示图片
                 if (Files.exists(file)) {
-                    val sizeMB = String.format("%.2f", bitmap.pixelCount * 4.0 / (1024 * 1024))
-                    sb.appendLine("                <div class=\"gallery-item\">")
-                    sb.appendLine("                    <img src=\"bitmaps/${fileName}\" alt=\"Bitmap\">")
-                    sb.appendLine("                    <div class=\"overlay\">${bitmap.width}x${bitmap.height} (${sizeMB}MB)</div>")
+                    sb.appendLine("                <div style=\"display: flex; align-items: flex-start; gap: 15px;\">")
+                    sb.appendLine("                    <img src=\"bitmaps/${fileName}\" alt=\"Bitmap\" style=\"max-width: 150px; max-height: 150px; object-fit: contain; border-radius: 4px;\">")
+                    sb.appendLine("                    <div style=\"flex: 1;\">")
+                    sb.appendLine("                        <div style=\"font-weight: 600; margin-bottom: 5px;\">${bitmap.width}x${bitmap.height} (${sizeMB}MB)</div>")
+                    sb.appendLine("                        <div style=\"font-size: 12px; color: #666;\">${fileName}</div>")
+                    sb.appendLine("                    </div>")
                     sb.appendLine("                </div>")
                 }
+
+                // 显示引用链
+                if (bitmap.referenceChain.isNotEmpty()) {
+                    sb.appendLine("                <div style=\"margin-top: 10px;\">")
+                    sb.appendLine("                    <div style=\"font-size: 12px; font-weight: 600; color: #666; margin-bottom: 5px;\">引用链 (GC Root → Bitmap):</div>")
+                    sb.appendLine("                    <div style=\"font-size: 11px; color: #888; line-height: 1.6;\">")
+                    bitmap.referenceChain.take(10).forEachIndexed { index, node ->
+                        val arrow = if (index < bitmap.referenceChain.size - 1) " → " else ""
+                        sb.appendLine("                        ${node.fullName}$arrow<br>")
+                    }
+                    if (bitmap.referenceChain.size > 10) {
+                        sb.appendLine("                        ... (还有${bitmap.referenceChain.size - 10}个节点)")
+                    }
+                    sb.appendLine("                    </div>")
+                    sb.appendLine("                </div>")
+                }
+
+                sb.appendLine("            </div>")
             }
-            sb.appendLine("            </div>")
             sb.appendLine("        </div>")
         }
 
-        // 所有Bitmap画廊
+        // 重复Bitmap组 (放在已提取Bitmap之前)
+        if (result.duplicateGroups.isNotEmpty()) {
+            sb.appendLine("        <div class=\"section\">")
+            sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🔄</span>重复的Bitmap (${result.duplicateGroups.size}组)</div>")
+
+            var totalWaste = 0L
+            result.duplicateGroups.forEach { (hash, bitmaps) ->
+                val singleSize = bitmaps.first().pixelCount * 4
+                val waste = (bitmaps.size - 1) * singleSize
+                totalWaste += waste
+
+                sb.appendLine("            <div class=\"duplicate-group\">")
+                sb.appendLine("                <div class=\"hash\">SHA-256: $hash</div>")
+                sb.appendLine("                <div><strong>尺寸:</strong> ${bitmaps.first().width} × ${bitmaps.first().height} (${bitmaps.first().config})</div>")
+                sb.appendLine("                <div><strong>重复次数:</strong> ${bitmaps.size}</div>")
+                sb.appendLine("                <div><strong>浪费:</strong> ${formatSize(waste.toLong())}</div>")
+
+                // 显示该组的图片和引用链
+                bitmaps.forEach { bitmap ->
+                    val fileName = "bitmap_${bitmap.objectId}_${hash.take(8)}_${bitmap.width}x${bitmap.height}.png"
+                    val file = result.outputDir.resolve(fileName)
+
+                    sb.appendLine("                <div style=\"margin-top: 10px; padding: 10px; background: white; border-radius: 4px;\">")
+
+                    // 显示图片
+                    if (Files.exists(file)) {
+                        sb.appendLine("                    <div style=\"display: flex; align-items: center; gap: 10px; margin-bottom: 8px;\">")
+                        sb.appendLine("                        <img src=\"bitmaps/$fileName\" alt=\"Bitmap\" style=\"max-width: 80px; max-height: 80px; object-fit: contain;\">")
+                        sb.appendLine("                        <div style=\"flex: 1; font-size: 12px;\">")
+                        sb.appendLine("                            <div><strong>文件:</strong> $fileName</div>")
+                        sb.appendLine("                        </div>")
+                        sb.appendLine("                    </div>")
+                    }
+
+                    // 显示引用链
+                    if (bitmap.referenceChain.isNotEmpty()) {
+                        sb.appendLine("                    <div style=\"font-size: 11px; color: #666; background: #f5f5f5; padding: 8px; border-radius: 4px;\">")
+                        sb.appendLine("                        <div style=\"font-weight: 600; margin-bottom: 4px;\">引用链:</div>")
+                        bitmap.referenceChain.take(8).forEachIndexed { index, node ->
+                            val arrow = if (index < bitmap.referenceChain.size - 1) " → " else ""
+                            sb.appendLine("                        ${node.fullName}$arrow<br>")
+                        }
+                        if (bitmap.referenceChain.size > 8) {
+                            sb.appendLine("                        ... (还有${bitmap.referenceChain.size - 8}个)")
+                        }
+                        sb.appendLine("                    </div>")
+                    }
+
+                    sb.appendLine("                </div>")
+                }
+
+                sb.appendLine("            </div>")
+            }
+
+            sb.appendLine("        </div>")
+
+            if (totalWaste > 0) {
+                sb.appendLine("        <div class=\"warning\">")
+                sb.appendLine("            <div class=\"title\">⚠️ 内存浪费:</div>")
+                sb.appendLine("            重复Bitmap导致约 ${formatSize(totalWaste)} 的内存浪费")
+                sb.appendLine("        </div>")
+            }
+        }
+
+        // 所有Bitmap画廊 (放在重复Bitmap之后)
         if (result.extractedBitmaps > 0) {
             sb.appendLine("        <div class=\"section\">")
             sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🖼️</span>所有已提取Bitmap (${result.extractedBitmaps}张)</div>")
@@ -847,52 +947,6 @@ class BitmapExtractor {
             sb.appendLine("        </div>")
         }
 
-        // 重复Bitmap组
-        if (result.duplicateGroups.isNotEmpty()) {
-            sb.appendLine("        <div class=\"section\">")
-            sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🔄</span>重复的Bitmap (${result.duplicateGroups.size}组)</div>")
-
-            var totalWaste = 0L
-            result.duplicateGroups.forEach { (hash, bitmaps) ->
-                val singleSize = bitmaps.first().pixelCount * 4
-                val waste = (bitmaps.size - 1) * singleSize
-                totalWaste += waste
-
-                sb.appendLine("            <div class=\"duplicate-group\">")
-                sb.appendLine("                <div class=\"hash\">SHA-256: $hash</div>")
-                sb.appendLine("                <div><strong>尺寸:</strong> ${bitmaps.first().width} × ${bitmaps.first().height} (${bitmaps.first().config})</div>")
-                sb.appendLine("                <div><strong>重复次数:</strong> ${bitmaps.size}</div>")
-                sb.appendLine("                <div><strong>浪费:</strong> ${formatSize(waste.toLong())}</div>")
-
-                // 显示该组的图片
-                if (bitmaps.size <= 6) {
-                    sb.appendLine("                <div class=\"bitmap-grid\">")
-                    bitmaps.forEach { bitmap ->
-                        val fileName = "bitmap_${bitmap.objectId}_${hash.take(8)}_${bitmap.width}x${bitmap.height}.png"
-                        val file = result.outputDir.resolve(fileName)
-                        if (Files.exists(file)) {
-                            sb.appendLine("                    <div class=\"bitmap-item\">")
-                            sb.appendLine("                        <img src=\"bitmaps/$fileName\" alt=\"Bitmap\">")
-                            sb.appendLine("                        <div class=\"bitmap-info\">${fileName}</div>")
-                            sb.appendLine("                    </div>")
-                        }
-                    }
-                    sb.appendLine("                </div>")
-                }
-
-                sb.appendLine("            </div>")
-            }
-
-            sb.appendLine("        </div>")
-
-            if (totalWaste > 0) {
-                sb.appendLine("        <div class=\"warning\">")
-                sb.appendLine("            <div class=\"title\">⚠️ 内存浪费:</div>")
-                sb.appendLine("            重复Bitmap导致约 ${formatSize(totalWaste)} 的内存浪费")
-                sb.appendLine("        </div>")
-            }
-        }
-
         sb.appendLine("    </div>")
         sb.appendLine("</body>")
         sb.appendLine("</html>")
@@ -905,6 +959,101 @@ class BitmapExtractor {
             bytes >= 1024 * 1024 -> "%.2f MB".format(bytes / (1024.0 * 1024))
             bytes >= 1024 -> "%.2f KB".format(bytes / 1024.0)
             else -> "$bytes B"
+        }
+    }
+
+    /**
+     * 为大Bitmap和重复Bitmap查找到GC Root的引用链
+     */
+    private fun findReferenceChains(
+        graph: kshark.HeapGraph,
+        largeBitmaps: List<BitmapInfo>,
+        duplicateGroups: Map<String, List<BitmapInfo>>
+    ): Pair<List<BitmapInfo>, Map<String, List<BitmapInfo>>> {
+        // 需要查找引用链的Bitmap集合
+        val bitmapsWithoutChain = mutableSetOf<BitmapInfo>()
+        bitmapsWithoutChain.addAll(largeBitmaps)
+        duplicateGroups.values.forEach { bitmapsWithoutChain.addAll(it) }
+
+        // 为每个Bitmap查找引用链
+        val updatedBitmaps = mutableMapOf<Long, BitmapInfo>()
+        bitmapsWithoutChain.forEach { bitmap ->
+            val chain = findReferenceChainForBitmap(graph, bitmap.objectId)
+            updatedBitmaps[bitmap.objectId] = bitmap.copy(referenceChain = chain)
+        }
+
+        // 更新大Bitmap列表
+        val updatedLargeBitmaps = largeBitmaps.map { updatedBitmaps[it.objectId] ?: it }
+
+        // 更新重复Bitmap组
+        val updatedDuplicates = duplicateGroups.mapValues { (_, bitmaps) ->
+            bitmaps.map { updatedBitmaps[it.objectId] ?: it }
+        }
+
+        return Pair(updatedLargeBitmaps, updatedDuplicates)
+    }
+
+    /**
+     * 查找单个Bitmap的引用链
+     * 使用HeapAnalyzer查找路径
+     */
+    private fun findReferenceChainForBitmap(
+        graph: kshark.HeapGraph,
+        bitmapObjectId: Long
+    ): List<ReferenceNode> {
+        val result = mutableListOf<ReferenceNode>()
+
+        try {
+            val bitmapObject = graph.findObjectById(bitmapObjectId)
+            if (bitmapObject == null) {
+                logger.warn("无法找到Bitmap对象: $bitmapObjectId")
+                return emptyList()
+            }
+
+            // 使用HeapAnalyzer查找引用链
+            val leakingObjectFinder = object : kshark.LeakingObjectFinder {
+                override fun findLeakingObjectIds(graph: kshark.HeapGraph): Set<Long> {
+                    return setOf(bitmapObjectId)
+                }
+            }
+
+            val analyzer = kshark.HeapAnalyzer(
+                listener = kshark.OnAnalysisProgressListener { _ -> }
+            )
+
+            // 执行分析
+            val analysis = analyzer.analyze(
+                heapDumpFile = java.io.File("dummy.hprof"),  // 实际文件不重要，因为我们有graph
+                graph = graph,
+                leakingObjectFinder = leakingObjectFinder,
+                referenceMatchers = kshark.AndroidReferenceMatchers.appDefaults,
+                computeRetainedHeapSize = false,
+                objectInspectors = emptyList()
+            )
+
+            if (analysis is kshark.HeapAnalysisSuccess) {
+                // 获取第一个泄露的trace
+                val leakTrace = analysis.applicationLeaks.firstOrNull()?.leakTraces?.firstOrNull()
+                if (leakTrace != null) {
+                    result.addAll(buildReferenceChain(leakTrace.referencePath))
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("查找引用链失败: $bitmapObjectId, ${e.message}")
+        }
+
+        return result
+    }
+
+    /**
+     * 从LeakTraceReference构建引用链
+     */
+    private fun buildReferenceChain(referencePath: List<kshark.LeakTraceReference>): List<ReferenceNode> {
+        return referencePath.map { ref ->
+            ReferenceNode(
+                className = ref.originObject.className,
+                fieldName = ref.referenceName
+            )
         }
     }
 }

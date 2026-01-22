@@ -16,8 +16,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
-
 import android.content.Context;
+import android.content.Intent;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -77,6 +77,19 @@ public class MainActivity extends AppCompatActivity {
         titleText.setPadding(0, 0, 0, 30);
         layout.addView(titleText);
 
+        // 检测能力说明
+        TextView capabilityText = new TextView(this);
+        capabilityText.setText("🔍 工具可检测的泄露类型：\n" +
+                "  ✅ Activity泄露 (已销毁但被引用)\n" +
+                "  ✅ Fragment泄露 (已销毁但被引用)\n" +
+                "  ✅ 大Bitmap (像素>1M)\n" + "  ✅ 大ByteArray (大小>1MB)\n" +
+                "  ✅ 重复线程名 (统计显示)\n\n" +
+                "⚠️  其他类型仅供参考，不会被检测为泄露");
+        capabilityText.setTextSize(13);
+        capabilityText.setPadding(20, 15, 20, 15);
+        capabilityText.setBackgroundColor(Color.rgb(240, 248, 255));
+        layout.addView(capabilityText);
+
         // 状态显示
         statusText = new TextView(this);
         statusText.setText("点击下方按钮创建不同类型的内存泄露");
@@ -93,54 +106,71 @@ public class MainActivity extends AppCompatActivity {
         layout.addView(memoryInfo);
 
         // ========== Bitmap泄露 ==========
-        addSectionTitle(layout, "📸 Bitmap内存泄露");
-        addLeakButton(layout, "Bitmap泄露 (1440x3200)", v -> createBitmapLeak());
-        addLeakButton(layout, "Bitmap泄露 (1920x1080) x10", v -> createMultipleBitmapLeak());
-        addLeakButton(layout, "Bitmap泄露 (2560x2560) 超大", v -> createHugeBitmapLeak());
+        addSectionTitle(layout, "📸 Bitmap内存泄露 (超大Bitmap可被检测)");
+        addLeakButton(layout, "Bitmap泄露 (1440x3200 可被检测)", v -> createBitmapLeak());
+        addLeakButton(layout, "Bitmap泄露 (1920x1080) x10 可被检测", v -> createMultipleBitmapLeak());
+        addLeakButton(layout, "Bitmap泄露 (2560x2560) 可被检测", v -> createHugeBitmapLeak());
 
         // ========== 基础数据类型泄露 ==========
-        addSectionTitle(layout, "📦 基础数据类型泄露");
-        addLeakButton(layout, "ByteArray泄露 (1MB x50)", v -> createByteArrayLeak());
-        addLeakButton(layout, "String泄露 (1MB x50)", v -> createStringLeak());
-        addLeakButton(layout, "IntArray泄露 (4MB x10)", v -> createIntArrayLeak());
-        addLeakButton(layout, "LongArray泄露 (8MB x10)", v -> createLongArrayLeak());
+        addSectionTitle(layout, "📦 基础数据类型泄露 (大ByteArray可被检测)");
+        addLeakButton(layout, "ByteArray泄露 (1MB x50 可被检测)", v -> createByteArrayLeak());
+        addLeakButton(layout, "String泄露 (1MB x50 仅演示)", v -> createStringLeak());
+        addLeakButton(layout, "IntArray泄露 (4MB x10 仅演示)", v -> createIntArrayLeak());
+        addLeakButton(layout, "LongArray泄露 (8MB x10 仅演示)", v -> createLongArrayLeak());
 
         // ========== 线程相关泄露 ==========
-        addSectionTitle(layout, "🧵 线程相关泄露");
-        addLeakButton(layout, "Thread泄露 (10个长期运行线程)", v -> createThreadLeak());
-        addLeakButton(layout, "Runnable泄露 (Handler持有)", v -> createRunnableLeak());
-        addLeakButton(layout, "Timer泄露 (未取消)", v -> createTimerLeak());
-        addLeakButton(layout, "🔥 重复线程名泄露 (20个同名)", v -> createDuplicateThreadLeak());
-        addLeakButton(layout, "🔥 多组重复线程 (5种x10)", v -> createMultipleDuplicateThreadLeak());
-        addLeakButton(layout, "🔥 增长型重复线程 (+10)", v -> createGrowingDuplicateThreadLeak());
+        addSectionTitle(layout, "🧵 线程相关泄露 (重复线程名可被统计)");
+        addLeakButton(layout, "Thread泄露 (10个 仅演示)", v -> createThreadLeak());
+        addLeakButton(layout, "Runnable泄露 (Handler持有 仅演示)", v -> createRunnableLeak());
+        addLeakButton(layout, "Timer泄露 (未取消 仅演示)", v -> createTimerLeak());
+        addLeakButton(layout, "🔥 重复线程名泄露 (20个同名 可被统计)", v -> createDuplicateThreadLeak());
+        addLeakButton(layout, "🔥 多组重复线程 (5种x10 可被统计)", v -> createMultipleDuplicateThreadLeak());
+        addLeakButton(layout, "🔥 增长型重复线程 (+10 可被统计)", v -> createGrowingDuplicateThreadLeak());
 
         // ========== Activity/Context泄露 ==========
         addSectionTitle(layout, "🏠 Activity/Context泄露");
-        addLeakButton(layout, "静态Activity引用泄露", v -> createStaticActivityLeak());
-        addLeakButton(layout, "Context泄露 (单例持有)", v -> createSingletonContextLeak());
+        addLeakButton(layout, "🔥 Activity泄露 (可被检测)", v -> createActivityLeakAndExit());
+
+        TextView activityTipText = new TextView(this);
+        activityTipText.setText("💡 说明：点击后会退出app，重新打开可检测到泄露");
+        activityTipText.setTextSize(12);
+        activityTipText.setTextColor(Color.rgb(0, 150, 0));
+        activityTipText.setPadding(0, 0, 0, 10);
+        layout.addView(activityTipText);
+
+        // 标注：其他按钮仅供演示，不会被工具检测为泄露
+        addLeakButton(layout, "Context泄露 (仅演示，不会检测)", v -> createSingletonContextLeak());
 
         // ========== 内部类泄露 ==========
         addSectionTitle(layout, "🔧 内部类泄露");
-        addLeakButton(layout, "非静态内部类泄露", v -> createInnerClassLeak());
-        addLeakButton(layout, "匿名内部类泄露", v -> createAnonymousClassLeak());
+        addLeakButton(layout, "非静态内部类泄露 (仅演示)", v -> createInnerClassLeak());
+        addLeakButton(layout, "匿名内部类泄露 (仅演示)", v -> createAnonymousClassLeak());
+
+        // 添加说明
+        TextView innerClassTip = new TextView(this);
+        innerClassTip.setText("💡 注：内部类泄露工具暂不支持检测\n这些按钮仅用于演示概念");
+        innerClassTip.setTextSize(11);
+        innerClassTip.setTextColor(Color.rgb(150, 150, 150));
+        innerClassTip.setPadding(0, 0, 0, 10);
+        layout.addView(innerClassTip);
 
         // ========== 资源泄露 ==========
         addSectionTitle(layout, "🔌 资源泄露");
-        addLeakButton(layout, "InputStream泄露 (未关闭)", v -> createInputStreamLeak());
-        addLeakButton(layout, "Drawable泄露 (静态引用)", v -> createDrawableLeak());
+        addLeakButton(layout, "InputStream泄露 (仅演示)", v -> createInputStreamLeak());
+        addLeakButton(layout, "Drawable泄露 (仅演示)", v -> createDrawableLeak());
 
         // ========== 集合泄露 ==========
         addSectionTitle(layout, "📚 集合泄露");
-        addLeakButton(layout, "ArrayList对象泄露", v -> createArrayListLeak());
-        addLeakButton(layout, "静态集合对象泄露", v -> createStaticCollectionLeak());
+        addLeakButton(layout, "ArrayList对象泄露 (仅演示)", v -> createArrayListLeak());
+        addLeakButton(layout, "静态集合对象泄露 (仅演示)", v -> createStaticCollectionLeak());
 
         // ========== 循环引用泄露 ==========
         addSectionTitle(layout, "🔄 循环引用泄露");
-        addLeakButton(layout, "双向引用循环泄露", v -> createCircularReferenceLeak());
+        addLeakButton(layout, "双向引用循环泄露 (仅演示)", v -> createCircularReferenceLeak());
 
         // ========== 自动泄露 ==========
         addSectionTitle(layout, "🔥 自动模式");
-        addLeakButton(layout, "自动泄露 (自动循环制造)", v -> startAutoLeak());
+        addLeakButton(layout, "自动泄露 (自动循环制造 仅演示)", v -> startAutoLeak());
 
         // 清空按钮
         addClearButton(layout);
@@ -301,6 +331,30 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ==================== Activity/Context泄露 ====================
+
+    /**
+     * 演示真正的Activity泄露
+     * 1. 创建静态引用持有当前MainActivity
+     * 2. 调用finish()并返回桌面
+     * 3. 重新打开app时会创建新的MainActivity
+     * 4. Dump Heap可以检测到旧的MainActivity泄露
+     */
+    private void createActivityLeakAndExit() {
+        // 1. 创建静态引用持有当前MainActivity
+        ActivityHolder holder = new ActivityHolder(this);
+        activityLeakList.add(holder);
+
+        // 2. 返回桌面
+        Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+        homeIntent.addCategory(Intent.CATEGORY_HOME);
+        homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(homeIntent);
+
+        // 3. 调用finish()销毁当前Activity
+        finish();
+
+        showToast("MainActivity 已创建泄露并退出，请重新打开 app");
+    }
 
     private void createStaticActivityLeak() {
         // 静态引用Activity，导致Activity无法被GC
@@ -781,4 +835,5 @@ public class MainActivity extends AppCompatActivity {
         updateStatus();
         showToast("创建增长型重复线程: +10个 (共" + growingThreads.size() + "个)");
     }
+
 }

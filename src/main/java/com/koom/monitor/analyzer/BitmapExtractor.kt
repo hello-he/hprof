@@ -40,6 +40,15 @@ class BitmapExtractor {
     }
 
     /**
+     * 单个对象的泄露查找器（用于避免匿名对象导致的ShadowJar问题）
+     */
+    private class SingleObjectLeakingObjectFinder(private val objectId: Long) : kshark.LeakingObjectFinder {
+        override fun findLeakingObjectIds(graph: kshark.HeapGraph): Set<Long> {
+            return setOf(objectId)
+        }
+    }
+
+    /**
      * 引用链节点
      */
     data class ReferenceNode(
@@ -819,7 +828,7 @@ class BitmapExtractor {
             sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🔴</span>大Bitmap (>1M像素, ${result.largeBitmaps}张)</div>")
 
             // 按大小分组
-            val sortedBitmaps = result.largeBitmapsList.sortedByDescending { it.pixelCount }
+            val sortedBitmaps = result.largeBitmapsList.sortedWith(compareByDescending { it.pixelCount })
 
             sortedBitmaps.forEach { bitmap ->
                 val hash = bitmap.imageHash ?: "unknown"
@@ -1049,11 +1058,7 @@ class BitmapExtractor {
             }
 
             // 使用HeapAnalyzer查找引用链
-            val leakingObjectFinder = object : kshark.LeakingObjectFinder {
-                override fun findLeakingObjectIds(graph: kshark.HeapGraph): Set<Long> {
-                    return setOf(bitmapObjectId)
-                }
-            }
+            val leakingObjectFinder = SingleObjectLeakingObjectFinder(bitmapObjectId)
 
             val analyzer = kshark.HeapAnalyzer(
                 listener = kshark.OnAnalysisProgressListener { _ -> }

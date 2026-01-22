@@ -4,6 +4,7 @@ import kshark.AndroidReferenceMatchers
 import kshark.HeapAnalyzer
 import kshark.HeapObject.HeapClass
 import kshark.HeapObject.HeapInstance
+import kshark.HeapObject.HeapPrimitiveArray
 import kshark.HprofHeapGraph.Companion.openHeapGraph
 import kshark.HprofRecordTag
 import kshark.LeakingObjectFinder
@@ -94,14 +95,33 @@ class HprofAnalyzer {
             // 统计包名分布
             analyzePackages(graph, stats)
 
+            // 统计线程信息
+            analyzeThreads(graph, stats)
+
             // 收集Bitmap信息（用于后续查找泄露对象中的Bitmap）
             val bitmapMap = collectBitmapInfo(graph, bitmapClass, stats)
 
-            // 创建自定义的LeakingObjectFinder - 只检测真正的泄露
+            // 创建自定义的LeakingObjectFinder - 检测真正的泄露 + 大对象
             val leakingObjectFinder = object : LeakingObjectFinder {
                 override fun findLeakingObjectIds(graph: kshark.HeapGraph): Set<Long> {
                     val leakingIds = mutableSetOf<Long>()
 
+                    // 先检查大ByteArray（从primitiveArrays）
+                    for (primitiveArray in graph.primitiveArrays) {
+                        val record = primitiveArray.readRecord()
+                        if (record is kshark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.ByteArrayDump) {
+                            val byteSize = record.size.toLong()
+
+                            // 大ByteArray阈值：>1MB
+                            if (byteSize > 1_000_000) {  // 1MB
+                                stats.leakedByteArrayCount++
+                                leakingIds.add(primitiveArray.objectId)
+                                logger.debug("发现大ByteArray: byte[] ${byteSize / 1024 / 1024}MB")
+                            }
+                        }
+                    }
+
+                    // 再检查HeapInstance（Activity/Fragment/Bitmap）
                     for (instance in graph.instances) {
                         // 检查Activity泄漏 - 必须是已销毁但仍可从GC Root到达的
                         if (isActivity(activityClass, instance)) {
@@ -141,12 +161,21 @@ class HprofAnalyzer {
                             continue
                         }
 
-                        // 检查NativeAllocation、Window等（仅统计，不作为泄露）
-                        if (instance.instanceClass.name == "libcore.util.NativeAllocationRegistry") {
-                            updateClassCounter(instance.instanceClassId)
-                        }
-                        if (instance.instanceClass.name == "android.view.Window") {
-                            updateClassCounter(instance.instanceClassId)
+                        // 检查大Bitmap - 大Bitmap本身也是潜在问题
+                        if (isBitmap(bitmapClass, instance)) {
+                            val widthField = instance[BITMAP_CLASS_NAME, "mWidth"]
+                            val heightField = instance[BITMAP_CLASS_NAME, "mHeight"]
+
+                            val width = widthField?.value?.asInt ?: 0
+                            val height = heightField?.value?.asInt ?: 0
+                            val pixelCount = width * height
+
+                            // 大Bitmap阈值：>1M像素，约4MB
+                            if (pixelCount > 1_000_000) {
+                                stats.leakedBitmapCount++
+                                leakingIds.add(instance.objectId)
+                                logger.debug("发现大Bitmap: ${instance.instanceClassName} ${width}x${height} (${pixelCount * 4 / 1024 / 1024}MB)")
+                            }
                         }
                     }
 
@@ -203,6 +232,49 @@ class HprofAnalyzer {
     }
 
     /**
+     * 分析线程信息
+     */
+    private fun analyzeThreads(graph: kshark.HeapGraph, stats: Statistics) {
+        val threadClass = graph.findClassByName("java.lang.Thread")
+        if (threadClass == null) {
+            logger.debug("未找到Thread类")
+            return
+        }
+
+        // 收集所有Thread子类
+        val threadSubClasses = mutableSetOf<Long>()
+        for (classObj in graph.classes) {
+            val hierarchy = classObj.classHierarchy.toList()
+            if (hierarchy.any { it.objectId == threadClass.objectId }) {
+                threadSubClasses.add(classObj.objectId)
+            }
+        }
+
+        logger.debug("找到 ${threadSubClasses.size} 个Thread相关类")
+
+        for (instance in graph.instances) {
+            // 检查是否是Thread实例或其子类
+            if (instance.instanceClassId !in threadSubClasses) continue
+
+            stats.threadCount++
+
+            // 获取线程名称
+            val nameField = instance["java.lang.Thread", "name"]
+            val threadName = nameField?.value?.readAsJavaString() ?: "<unnamed>"
+
+            // 统计线程名称
+            stats.threadNameCount[threadName] = stats.threadNameCount.getOrDefault(threadName, 0) + 1
+        }
+
+        logger.debug("发现 ${stats.threadCount} 个线程")
+        stats.threadNameCount.forEach { (name, count) ->
+            if (count >= 3) {  // 同名线程超过3个就记录
+                logger.debug("  - $name: $count 个")
+            }
+        }
+    }
+
+    /**
      * 收集Bitmap信息（objectId -> BitmapInfo）
      */
     private fun collectBitmapInfo(
@@ -254,6 +326,26 @@ class HprofAnalyzer {
     ): List<LeakingObject> {
         val results = mutableListOf<LeakingObject>()
 
+        // 辅助函数：根据objectId查找图片文件
+        fun findBitmapImageFile(objectId: Long): String? {
+            if (bitmapOutputDir == null) return null
+
+            try {
+                val bitmapDir = bitmapOutputDir.resolve("bitmaps")
+                if (!Files.exists(bitmapDir)) return null
+
+                return Files.list(bitmapDir)
+                    .filter { Files.isRegularFile(it) }
+                    .filter { it.fileName.toString().startsWith("bitmap_${objectId}_") }
+                    .findFirst()
+                    .map { file -> "bitmaps/${file.fileName}" }
+                    .orElse(null)
+            } catch (e: Exception) {
+                // Ignore errors
+            }
+            return null
+        }
+
         // 检查Bitmap输出目录中已有的图片文件
         val existingBitmapFiles = mutableMapOf<String, Path>()
         if (bitmapOutputDir != null && Files.exists(bitmapOutputDir)) {
@@ -272,10 +364,13 @@ class HprofAnalyzer {
                 }
         }
 
+        logger.debug("找到 ${existingBitmapFiles.size} 个bitmap文件")
+
         // 更新bitmapMap中的图片文件信息
         existingBitmapFiles.forEach { (objectIdStr, filePath) ->
             val objectId = objectIdStr.toLongOrNull() ?: return@forEach
-            bitmapMap[objectId]?.let { bmp ->
+            val bmp = bitmapMap[objectId]
+            if (bmp != null) {
                 bmp.hasImageFile = true
                 bmp.imageFilePath = "bitmaps/${filePath.fileName}"
             }
@@ -288,28 +383,60 @@ class HprofAnalyzer {
                 val leakingObjectId = leakTrace.leakingObject.objectId
 
                 // 检查此泄露对象中包含的Bitmap
-                val heapObject = graph.findObjectById(leakingObjectId)
-                val containedBitmaps = if (heapObject != null) {
-                    val bitmaps = findContainedBitmaps(heapObject, bitmapMap, existingBitmapFiles).toMutableList()
+                val bitmapInfo = bitmapMap[leakingObjectId]
+                val isLeakingBitmap = bitmapInfo != null && bitmapInfo.pixelCount >= 100_000
 
-                    // 如果泄露对象本身就是Bitmap，添加到containedBitmaps中
-                    val bitmapInfo = bitmapMap[leakingObjectId]
-                    if (bitmapInfo != null && bitmapInfo.pixelCount >= 100_000) {
-                        bitmaps.add(
+                val containedBitmaps = if (isLeakingBitmap) {
+                    // 如果泄露对象本身就是Bitmap，创建空列表（后面会手动添加所有实例）
+                    mutableListOf()
+                } else {
+                    val heapObject = graph.findObjectById(leakingObjectId)
+                    if (heapObject != null) {
+                        findContainedBitmaps(heapObject, bitmapMap, existingBitmapFiles).toMutableList()
+                    } else {
+                        mutableListOf()
+                    }
+                }
+
+                // 如果泄露对象本身就是Bitmap，且有多个相同泄露（instanceCount > 1）
+                // 需要为每个泄露的Bitmap实例添加条目
+                if (isLeakingBitmap) {
+                    // bitmapInfo 在这里不为 null（因为 isLeakingBitmap 检查了）
+                    val baseInfo = bitmapInfo!!
+
+                    // 如果有多个相同泄露，显示所有实例
+                    if (appLeak.leakTraces.size > 1) {
+                        // 为每个leakTrace创建一个条目
+                        appLeak.leakTraces.take(10).forEach { trace ->
+                            val objectId = trace.leakingObject.objectId
+                            val info = bitmapMap[objectId] ?: baseInfo
+
+                            val path = findBitmapImageFile(objectId)
+                                ?: info.imageFilePath
+
+                            containedBitmaps.add(
+                                ContainedBitmap(
+                                    objectId = objectId,
+                                    width = info.width,
+                                    height = info.height,
+                                    pixelCount = info.pixelCount,
+                                    imageFilePath = path
+                                )
+                            )
+                        }
+                    } else {
+                        // 只有一个泄露，显示一次
+                        containedBitmaps.add(
                             0,
                             ContainedBitmap(
                                 objectId = leakingObjectId,
-                                width = bitmapInfo.width,
-                                height = bitmapInfo.height,
-                                pixelCount = bitmapInfo.pixelCount,
-                                imageFilePath = bitmapInfo.imageFilePath
+                                width = baseInfo.width,
+                                height = baseInfo.height,
+                                pixelCount = baseInfo.pixelCount,
+                                imageFilePath = baseInfo.imageFilePath ?: findBitmapImageFile(leakingObjectId)
                             )
                         )
                     }
-
-                    bitmaps
-                } else {
-                    emptyList()
                 }
 
                 results.add(
@@ -335,28 +462,56 @@ class HprofAnalyzer {
                 val leakingObjectId = leakTrace.leakingObject.objectId
 
                 // 检查此泄露对象中包含的Bitmap
-                val heapObject = graph.findObjectById(leakingObjectId)
-                val containedBitmaps = if (heapObject != null) {
-                    val bitmaps = findContainedBitmaps(heapObject, bitmapMap, existingBitmapFiles).toMutableList()
+                val bitmapInfo = bitmapMap[leakingObjectId]
+                val isLeakingBitmap = bitmapInfo != null && bitmapInfo.pixelCount >= 100_000
 
-                    // 如果泄露对象本身就是Bitmap，添加到containedBitmaps中
-                    val bitmapInfo = bitmapMap[leakingObjectId]
-                    if (bitmapInfo != null && bitmapInfo.pixelCount >= 100_000) {
-                        bitmaps.add(
+                val containedBitmaps = if (isLeakingBitmap) {
+                    mutableListOf()
+                } else {
+                    val heapObject = graph.findObjectById(leakingObjectId)
+                    if (heapObject != null) {
+                        findContainedBitmaps(heapObject, bitmapMap, existingBitmapFiles).toMutableList()
+                    } else {
+                        mutableListOf()
+                    }
+                }
+
+                // 如果泄露对象本身就是Bitmap，且有多个相同泄露（instanceCount > 1）
+                if (isLeakingBitmap) {
+                    // bitmapInfo 在这里不为 null（因为 isLeakingBitmap 检查了）
+                    val baseInfo = bitmapInfo!!
+
+                    if (libLeak.leakTraces.size > 1) {
+                        // 为每个leakTrace创建一个条目
+                        libLeak.leakTraces.take(10).forEach { trace ->
+                            val objectId = trace.leakingObject.objectId
+                            val info = bitmapMap[objectId] ?: baseInfo
+
+                            val path = findBitmapImageFile(objectId)
+                                ?: info.imageFilePath
+
+                            containedBitmaps.add(
+                                ContainedBitmap(
+                                    objectId = objectId,
+                                    width = info.width,
+                                    height = info.height,
+                                    pixelCount = info.pixelCount,
+                                    imageFilePath = path
+                                )
+                            )
+                        }
+                    } else {
+                        containedBitmaps.add(
                             0,
                             ContainedBitmap(
                                 objectId = leakingObjectId,
-                                width = bitmapInfo.width,
-                                height = bitmapInfo.height,
-                                pixelCount = bitmapInfo.pixelCount,
-                                imageFilePath = bitmapInfo.imageFilePath
+                                width = baseInfo.width,
+                                height = baseInfo.height,
+                                pixelCount = baseInfo.pixelCount,
+                                imageFilePath = baseInfo.imageFilePath ?: findBitmapImageFile(leakingObjectId)
                             )
                         )
                     }
-
-                    bitmaps
-                } else {
-                    emptyList()
                 }
 
                 results.add(
@@ -519,6 +674,10 @@ class HprofAnalyzer {
         var largeBitmapCount: Int = 0,
         var leakedActivityCount: Int = 0,
         var leakedFragmentCount: Int = 0,
+        var leakedBitmapCount: Int = 0,
+        var leakedByteArrayCount: Int = 0,
+        var threadCount: Int = 0,
+        val threadNameCount: MutableMap<String, Int> = mutableMapOf(),
         val detectedPackages: MutableList<String> = mutableListOf()
     ) {
         fun formatSize(bytes: Long): String {
@@ -569,6 +728,25 @@ class HprofAnalyzer {
             println("   Dalvik/Libcore: ${"%,d".format(stats.dalvikCount)}")
             println("   应用类: ${"%,d".format(stats.appClassCount)}")
             println()
+
+            // 线程统计
+            if (stats.threadCount > 0) {
+                println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                println("🧵 线程统计")
+                println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                println("   总线程数: ${stats.threadCount}")
+
+                // 显示同名线程数量较多的
+                val frequentThreads = stats.threadNameCount.filter { it.value >= 3 }
+                    .entries.sortedByDescending { it.value }
+                if (frequentThreads.isNotEmpty()) {
+                    println("   同名线程(≥3个):")
+                    frequentThreads.forEach { (name, count) ->
+                        println("      - $name: $count 个")
+                    }
+                }
+                println()
+            }
 
             if (stats.detectedPackages.isNotEmpty()) {
                 println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -625,24 +803,38 @@ class HprofAnalyzer {
                             println("        相同泄露: ${leak.instanceCount} 个")
                         }
                         // 打印引用链
-                        leak.referenceChain.take(5).forEach { ref ->
+                        leak.referenceChain.forEach { ref ->
                             println("          → ${ref.fullName}")
                         }
-                        if (leak.referenceChain.size > 5) {
-                            println("          ... (还有 ${leak.referenceChain.size - 5} 层)")
-                        }
-                    }
-                    if (objects.size > 5) {
-                        println("      ... 还有 ${objects.size - 5} 个")
                     }
                 }
                 println()
-            } else {
+            }
+
+            // 显示大对象统计（始终显示，如果有大对象的话）
+            if (stats.leakedBitmapCount > 0 || stats.leakedByteArrayCount > 0) {
                 println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                println("✅ 未发现内存泄露")
+                println("📊 大对象统计")
                 println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                println("   没有检测到Activity或Fragment的内存泄露。")
-                println("   (Bitmap分析请查看 bitmap_analysis.html)")
+                if (stats.leakedBitmapCount > 0) {
+                    println("   大Bitmap(>1M像素): ${stats.leakedBitmapCount} 个")
+                }
+                if (stats.leakedByteArrayCount > 0) {
+                    println("   大ByteArray(>1MB): ${stats.leakedByteArrayCount} 个")
+                }
+                println()
+            }
+
+            if (leakingObjects.isEmpty()) {
+                println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                println("✅ 未发现Activity/Fragment内存泄露")
+                println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+                println("💡 说明:")
+                println("   - Activity/Fragment未销毁，不视为泄露")
+                println("   - 但大Bitmap/大ByteArray占用大量内存也值得关注")
+                println("   - 这些对象已在分析报告中标记为\"泄露\"")
+                println("   - (Bitmap详细分析请查看 bitmap_analysis.html)")
                 println()
             }
         }
@@ -651,20 +843,19 @@ class HprofAnalyzer {
          * 保存报告到文件
          */
         fun saveReport(outputDir: Path): List<Path> {
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
             val files = mutableListOf<Path>()
 
             // 创建输出目录
             Files.createDirectories(outputDir)
 
-            // 写入文本报告
-            val txtFile = outputDir.resolve("hprof_analysis_${timestamp}.txt")
+            // 写入文本报告（不带时间戳）
+            val txtFile = outputDir.resolve("hprof_analysis.txt")
             Files.writeString(txtFile, generateTextReport())
             files.add(txtFile)
 
-            // 写入HTML报告
-            val htmlFile = outputDir.resolve("hprof_analysis_${timestamp}.html")
-            Files.writeString(htmlFile, generateHtmlReport())
+            // 写入HTML报告（不带时间戳）
+            val htmlFile = outputDir.resolve("hprof_analysis.html")
+            Files.writeString(htmlFile, generateHtmlReport(bitmapOutputDir))
             files.add(htmlFile)
 
             return files
@@ -698,6 +889,25 @@ class HprofAnalyzer {
             sb.appendLine("   Dalvik/Libcore: ${"%,d".format(stats.dalvikCount)}")
             sb.appendLine("   应用类: ${"%,d".format(stats.appClassCount)}")
             sb.appendLine()
+
+            // 线程统计
+            if (stats.threadCount > 0) {
+                sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                sb.appendLine("🧵 线程统计")
+                sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                sb.appendLine("   总线程数: ${stats.threadCount}")
+
+                // 显示同名线程数量较多的
+                val frequentThreads = stats.threadNameCount.filter { it.value >= 3 }
+                    .entries.sortedByDescending { it.value }
+                if (frequentThreads.isNotEmpty()) {
+                    sb.appendLine("   同名线程(≥3个):")
+                    frequentThreads.forEach { (name, count) ->
+                        sb.appendLine("      - $name: $count 个")
+                    }
+                }
+                sb.appendLine()
+            }
 
             if (stats.detectedPackages.isNotEmpty()) {
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -753,15 +963,9 @@ class HprofAnalyzer {
                         if (leak.instanceCount > 1) {
                             sb.appendLine("        相同泄露: ${leak.instanceCount} 个")
                         }
-                        leak.referenceChain.take(5).forEach { ref ->
+                        leak.referenceChain.forEach { ref ->
                             sb.appendLine("          → ${ref.fullName}")
                         }
-                        if (leak.referenceChain.size > 5) {
-                            sb.appendLine("          ... (还有 ${leak.referenceChain.size - 5} 层)")
-                        }
-                    }
-                    if (objects.size > 5) {
-                        sb.appendLine("      ... 还有 ${objects.size - 5} 个")
                     }
                 }
                 sb.appendLine()
@@ -777,7 +981,27 @@ class HprofAnalyzer {
             return sb.toString()
         }
 
-        private fun generateHtmlReport(): String {
+        private fun generateHtmlReport(bitmapOutputDir: Path?): String {
+            // 辅助函数：根据objectId查找图片文件
+            fun findBitmapImageFile(objectId: Long): String? {
+                if (bitmapOutputDir == null) return null
+
+                try {
+                    // bitmapOutputDir 已经是 bitmap 目录，不需要再 resolve("bitmaps")
+                    if (!Files.exists(bitmapOutputDir)) return null
+
+                    return Files.list(bitmapOutputDir)
+                        .filter { Files.isRegularFile(it) }
+                        .filter { it.fileName.toString().startsWith("bitmap_${objectId}_") }
+                        .findFirst()
+                        .map { file -> "bitmaps/${file.fileName}" }
+                        .orElse(null)
+                } catch (e: Exception) {
+                    // Ignore errors
+                }
+                return null
+            }
+
             val sb = StringBuilder()
             sb.appendLine("<!DOCTYPE html>")
             sb.appendLine("<html lang=\"zh-CN\">")
@@ -861,6 +1085,36 @@ class HprofAnalyzer {
             sb.appendLine("            </div>")
             sb.appendLine("        </div>")
 
+            // 线程统计
+            if (stats.threadCount > 0) {
+                sb.appendLine("        <div class=\"section\">")
+                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🧵</span>线程统计</div>")
+                sb.appendLine("            <div class=\"stats-grid\">")
+                sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">总线程数</div><div class=\"value\">${stats.threadCount}</div></div>")
+
+                // 同名线程数量较多的
+                val frequentThreads = stats.threadNameCount.filter { it.value >= 3 }
+                    .entries.sortedByDescending { it.value }
+                if (frequentThreads.isNotEmpty()) {
+                    sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">同名线程(≥3)</div><div class=\"value\">${frequentThreads.size} 种</div></div>")
+                }
+                sb.appendLine("            </div>")
+
+                // 显示同名线程详情
+                if (frequentThreads.isNotEmpty()) {
+                    sb.appendLine("            <div style=\"margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 6px;\">")
+                    sb.appendLine("                <div style=\"font-weight: 600; margin-bottom: 10px; color: #333;\">同名线程详情:</div>")
+                    frequentThreads.forEach { (name, count) ->
+                        sb.appendLine("                <div style=\"padding: 5px 0; font-size: 13px;\">")
+                        sb.appendLine("                    <span style=\"color: #666;\">$name:</span> <span style=\"font-weight: 600; color: #ff9800;\">$count 个</span>")
+                        sb.appendLine("                </div>")
+                    }
+                    sb.appendLine("            </div>")
+                }
+
+                sb.appendLine("        </div>")
+            }
+
             // 检测到的应用包
             if (stats.detectedPackages.isNotEmpty()) {
                 sb.appendLine("        <div class=\"section\">")
@@ -937,11 +1191,15 @@ class HprofAnalyzer {
                                 sb.appendLine("                            <div><strong>包含的Bitmap (${leak.containedBitmaps.size}个):</strong></div>")
                             }
 
-                            leak.containedBitmaps.take(5).forEach { bmp ->
+                            leak.containedBitmaps.take(15).forEach { bmp ->
                                 val sizeMB = "%.2f".format(bmp.pixelCount * 4.0 / (1024 * 1024))
-                                if (bmp.imageFilePath != null) {
+
+                                // 尝试查找匹配的图片文件
+                                val imagePath = bmp.imageFilePath ?: findBitmapImageFile(bmp.objectId)
+
+                                if (imagePath != null) {
                                     sb.appendLine("                            <div class=\"bitmap-item\">")
-                                    sb.appendLine("                                <img src=\"${bmp.imageFilePath}\" class=\"bitmap-thumb\" alt=\"Bitmap\">")
+                                    sb.appendLine("                                <img src=\"$imagePath\" class=\"bitmap-thumb\" alt=\"Bitmap\">")
                                     sb.appendLine("                                <span>${bmp.width}x${bmp.height} (${sizeMB}MB)</span>")
                                     sb.appendLine("                            </div>")
                                 } else {
@@ -950,40 +1208,57 @@ class HprofAnalyzer {
                                     sb.appendLine("                            </div>")
                                 }
                             }
-                            if (leak.containedBitmaps.size > 5) {
-                                sb.appendLine("                            <div style=\"font-size: 11px; color: #888;\">... 还有 ${leak.containedBitmaps.size - 5} 个Bitmap</div>")
-                            }
                             sb.appendLine("                        </div>")
                         }
 
                         if (leak.referenceChain.isNotEmpty()) {
                             sb.appendLine("                        <div class=\"reference-chain\">")
                             sb.appendLine("                            <div><strong>引用链:</strong></div>")
-                            leak.referenceChain.take(8).forEach { ref ->
+                            leak.referenceChain.forEach { ref ->
                                 sb.appendLine("                            <div class=\"ref\"><span class=\"arrow\">→</span>${ref.fullName}</div>")
-                            }
-                            if (leak.referenceChain.size > 8) {
-                                sb.appendLine("                            <div class=\"ref\">... 还有 ${leak.referenceChain.size - 8} 层</div>")
                             }
                             sb.appendLine("                        </div>")
                         }
                         sb.appendLine("                    </div>")
                         sb.appendLine("                </div>")
                     }
-                    if (objects.size > 10) {
-                        sb.appendLine("                <div style=\"color: #666; padding: 10px;\">... 还有 ${objects.size - 10} 个</div>")
-                    }
                     sb.appendLine("            </div>")
                 }
 
                 sb.appendLine("        </div>")
-            } else {
+            }
+
+            // 显示大对象统计（始终显示，如果有大对象的话）
+            if (stats.leakedBitmapCount > 0 || stats.leakedByteArrayCount > 0) {
+                sb.appendLine("        <div class=\"section\">")
+                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📊</span>大对象统计</div>")
+                sb.appendLine("            <div class=\"stats-grid\">")
+                if (stats.leakedBitmapCount > 0) {
+                    sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">大Bitmap(>1M像素)</div><div class=\"value\">${stats.leakedBitmapCount}</div></div>")
+                }
+                if (stats.leakedByteArrayCount > 0) {
+                    sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">大ByteArray(>1MB)</div><div class=\"value\">${stats.leakedByteArrayCount}</div></div>")
+                }
+                sb.appendLine("            </div>")
+                sb.appendLine("            <div class=\"info-box\">")
+                sb.appendLine("                <div style=\"font-size: 13px; color: #666;\">")
+                sb.appendLine("                    <strong>说明:</strong> 这些大对象(Bitmap>1M像素, ByteArray>1MB)被标记为潜在内存问题，")
+                sb.appendLine("                    可能导致内存占用过高。详细分析请查看 <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a>")
+                sb.appendLine("                </div>")
+                sb.appendLine("            </div>")
+                sb.appendLine("        </div>")
+            }
+
+            if (leakingObjects.isEmpty()) {
                 // 无泄露时显示更友好的界面
                 sb.appendLine("        <div class=\"section\">")
                 sb.appendLine("            <div class=\"no-leak\">")
                 sb.appendLine("                <div class=\"icon\">✅</div>")
-                sb.appendLine("                <h2>未发现内存泄露</h2>")
+                sb.appendLine("                <h2>未发现Activity/Fragment内存泄露</h2>")
                 sb.appendLine("                <p>在此次分析中未检测到Activity或Fragment的内存泄露。</p>")
+                if (stats.leakedBitmapCount > 0 || stats.leakedByteArrayCount > 0) {
+                    sb.appendLine("                <p style=\"margin-top: 10px; color: #666;\">但检测到大对象占用内存，请查看上方的\"大对象统计\"。</p>")
+                }
                 sb.appendLine("                <div class=\"info-box\" style=\"display: inline-block; margin-top: 20px;\">")
                 sb.appendLine("                    <div class=\"title\">📁 查看Bitmap分析</div>")
                 sb.appendLine("                    <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a> - 包含所有大Bitmap和重复Bitmap的分析")

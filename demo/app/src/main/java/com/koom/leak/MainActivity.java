@@ -5,6 +5,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -18,6 +19,20 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
+import android.animation.Animator;
+import android.app.Dialog;
+import android.app.Service;
+import android.os.Message;
+import android.os.Messenger;
+import android.view.WindowManager;
+import android.widget.FrameLayout;
+import androidx.lifecycle.ViewModel;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.lifecycle.ViewModelStore;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -44,6 +59,13 @@ public class MainActivity extends AppCompatActivity {
     private static List<Object> staticLeakList = new ArrayList<>();
     private static List<Drawable> drawableLeakList = new ArrayList<>();
     private static List<FragmentHolder> fragmentLeakList = new ArrayList<>();
+    private static List<View> leakedViews = new ArrayList<>();
+    private static List<ViewModel> leakedViewModels = new ArrayList<>();
+    private static List<Service> leakedServices = new ArrayList<>();
+    private static List<Dialog> leakedDialogs = new ArrayList<>();
+    private static List<Object> leakedMessages = new ArrayList<>();  // 用于持有Handler和Message引用
+    private static List<Object> leakedReceivers = new ArrayList<>();  // 用于持有BroadcastReceiver引用
+    private static List<Animator> leakedAnimators = new ArrayList<>();
 
     private Handler handler = new Handler(Looper.getMainLooper());
     private int leakBatchCount = 0;
@@ -83,10 +105,19 @@ public class MainActivity extends AppCompatActivity {
         capabilityText.setText("🔍 工具可检测的泄露类型：\n" +
                 "  ✅ Activity泄露 (已销毁但被引用)\n" +
                 "  ✅ Fragment泄露 (已销毁但被引用)\n" +
-                "  ✅ 大Bitmap (像素>1M)\n" + "  ✅ 大ByteArray (大小>1MB)\n" +
-                "  ✅ 重复线程名 (统计显示)\n\n" +
+                "  ✅ View泄露 (root view, 已销毁Activity引用)\n" +
+                "  ✅ ViewModel泄露 (已清除但被引用)\n" +
+                "  ✅ Service泄露 (已停止但被引用)\n" +
+                "  ✅ Dialog泄露 (已关闭但被引用)\n" +
+                "  ✅ Handler/Message泄露 (Message.obj持有引用)\n" +
+                "  ✅ BroadcastReceiver泄露 (已注册但未注销)\n" +
+                "  ✅ Animator泄露 (无限循环持有引用)\n" +
+                "  ✅ 大Bitmap (像素>1M)\n" +
+                "  ✅ 大ByteArray (大小>1MB)\n" +
+                "  ✅ 重复线程名 (统计显示)\n" +
+                "  ✅ NativeAllocationRegistry (统计)\n\n" +
                 "⚠️  其他类型仅供参考，不会被检测为泄露");
-        capabilityText.setTextSize(13);
+        capabilityText.setTextSize(12);
         capabilityText.setPadding(20, 15, 20, 15);
         capabilityText.setBackgroundColor(Color.rgb(240, 248, 255));
         layout.addView(capabilityText);
@@ -132,6 +163,16 @@ public class MainActivity extends AppCompatActivity {
         addSectionTitle(layout, "🏠 Activity/Fragment泄露");
         addLeakButton(layout, "🔥 Activity泄露 (可被检测)", v -> createActivityLeakAndExit());
         addLeakButton(layout, "🔥 Fragment泄露 (可被检测)", v -> createFragmentLeak());
+
+        // ========== View/ViewModel/Service/Dialog泄露 ==========
+        addSectionTitle(layout, "🖼️ View/ViewModel/Service/Dialog泄露");
+        addLeakButton(layout, "🔥 View泄露 (root view 可被检测)", v -> createViewLeak());
+        addLeakButton(layout, "🔥 ViewModel泄露 (可被检测)", v -> createViewModelLeak());
+        addLeakButton(layout, "🔥 Service泄露 (可被检测)", v -> createServiceLeak());
+        addLeakButton(layout, "🔥 Dialog泄露 (可被检测)", v -> createDialogLeak());
+        addLeakButton(layout, "🔥 Handler/Message泄露 (可被检测)", v -> createHandlerMessageLeak());
+        addLeakButton(layout, "🔥 BroadcastReceiver泄露 (可被检测)", v -> createBroadcastReceiverLeak());
+        addLeakButton(layout, "🔥 Animator泄露 (可被检测)", v -> createAnimatorLeak());
 
         TextView activityTipText = new TextView(this);
         activityTipText.setText("💡 说明：点击后会退出app，重新打开可检测到泄露");
@@ -544,6 +585,13 @@ public class MainActivity extends AppCompatActivity {
         staticLeakList.clear();
         drawableLeakList.clear();
         fragmentLeakList.clear();
+        leakedViews.clear();
+        leakedViewModels.clear();
+        leakedServices.clear();
+        leakedDialogs.clear();
+        leakedMessages.clear();
+        leakedReceivers.clear();
+        leakedAnimators.clear();
 
         // 停止并清空线程
         for (LeakRunnable runnable : leakedRunnables) {
@@ -843,49 +891,434 @@ public class MainActivity extends AppCompatActivity {
         showToast("创建增长型重复线程: +10个 (共" + growingThreads.size() + "个)");
     }
 
+    // ==================== View泄露 ====================
+
+    /**
+     * 创建View泄露（root view）
+     * 参考Fragment泄露的做法：创建一个新Activity，在其中创建View，然后finish Activity
+     * 这样View会持有已销毁Activity的引用，但仍被静态引用持有
+     */
+    private void createViewLeak() {
+        // 设置静态列表，用于持有View
+        LeakedViewActivity.setViewLeakList(leakedViews);
+        
+        // 启动新Activity，在其中创建View并立即finish
+        Intent intent = new Intent(this, LeakedViewActivity.class);
+        startActivity(intent);
+        
+        leakBatchCount++;
+        updateStatus();
+        showToast("创建View泄露\n提示：退出app后重新打开，然后dump hprof");
+    }
+    
+    /**
+     * 用于测试View泄露的Activity
+     * 参考Fragment泄露的做法
+     */
+    public static class LeakedViewActivity extends AppCompatActivity {
+        private static List<View> viewLeakList;
+        
+        public static void setViewLeakList(List<View> list) {
+            viewLeakList = list;
+        }
+        
+        @Override
+        protected void onCreate(Bundle savedInstanceState) {
+            super.onCreate(savedInstanceState);
+            
+            // 创建一个根视图（持有当前Activity的引用）
+            FrameLayout rootView = new FrameLayout(this);
+            rootView.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+            
+            // 立即将View添加到静态列表（造成泄露）
+            // 然后finish Activity，View会持有已销毁Activity的引用
+            viewLeakList.add(rootView);
+            
+            // finish Activity，View会持有已销毁Activity的引用
+            finish();
+        }
+    }
+
+    // ==================== ViewModel泄露 ====================
+
+    /**
+     * 创建ViewModel泄露
+     * 创建ViewModel并静态引用持有，即使已清除
+     * 注意：ViewModel的mCleared字段需要通过反射或hprof分析来检测
+     */
+    private void createViewModelLeak() {
+        // 创建ViewModel
+        TestViewModel viewModel = new TestViewModel();
+        
+        // 调用onCleared()来设置mCleared字段（模拟ViewModel已清除）
+        try {
+            java.lang.reflect.Method onCleared = androidx.lifecycle.ViewModel.class.getDeclaredMethod("onCleared");
+            onCleared.setAccessible(true);
+            onCleared.invoke(viewModel);
+            
+            // 通过反射设置mCleared字段为true
+            java.lang.reflect.Field mClearedField = androidx.lifecycle.ViewModel.class.getDeclaredField("mCleared");
+            mClearedField.setAccessible(true);
+            mClearedField.setBoolean(viewModel, true);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to set mCleared field", e);
+            // 如果反射失败，至少标记为已清除
+            viewModel.markCleared();
+        }
+        
+        // 静态引用持有（造成泄露）
+        leakedViewModels.add(viewModel);
+        
+        leakBatchCount++;
+        updateStatus();
+        showToast("创建ViewModel泄露");
+    }
+
+    // ==================== Service泄露 ====================
+
+    /**
+     * 创建Service泄露
+     * 创建Service并静态引用持有，即使已停止
+     * 注意：Service的mDestroyed字段需要通过反射或hprof分析来检测
+     */
+    private void createServiceLeak() {
+        // 创建Service实例
+        TestService service = new TestService();
+        
+        // 调用onDestroy()来设置mDestroyed字段（模拟Service已停止）
+        try {
+            java.lang.reflect.Method onDestroy = Service.class.getDeclaredMethod("onDestroy");
+            onDestroy.setAccessible(true);
+            onDestroy.invoke(service);
+            
+            // 通过反射设置mDestroyed字段为true
+            java.lang.reflect.Field mDestroyedField = Service.class.getDeclaredField("mDestroyed");
+            mDestroyedField.setAccessible(true);
+            mDestroyedField.setBoolean(service, true);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to set mDestroyed field", e);
+            // 如果反射失败，至少标记为已销毁
+            service.markDestroyed();
+        }
+        
+        // 静态引用持有（造成泄露）
+        leakedServices.add(service);
+        
+        leakBatchCount++;
+        updateStatus();
+        showToast("创建Service泄露");
+    }
+
+    // ==================== Dialog泄露 ====================
+
+    /**
+     * 创建Dialog泄露
+     * 创建Dialog并静态引用持有，即使已关闭
+     */
+    private void createDialogLeak() {
+        // 创建Dialog
+        Dialog dialog = new Dialog(this);
+        dialog.setTitle("Leak Dialog");
+        dialog.setContentView(new TextView(this));
+        
+        // 显示并立即关闭
+        dialog.show();
+        dialog.dismiss();
+        
+        // 静态引用持有（造成泄露）
+        leakedDialogs.add(dialog);
+        
+        leakBatchCount++;
+        updateStatus();
+        showToast("创建Dialog泄露");
+    }
+
+    // ==================== Handler/Message泄露 ====================
+
+    /**
+     * 创建Handler/Message泄露
+     * 直接在MainActivity中创建非静态内部类Handler，持有MainActivity引用
+     * 将Handler添加到静态列表，确保Handler不被回收
+     */
+    private void createHandlerMessageLeak() {
+        // 创建非静态内部类Handler（隐式持有MainActivity引用）
+        // 类名格式：com.koom.leak.MainActivity$LeakHandler
+        LeakHandler leakHandler = new LeakHandler();
+        
+        // 创建Message
+        Message message = leakHandler.obtainMessage();
+        message.obj = this; // obj也持有Activity引用
+        message.what = 1;
+        
+        // 将Handler和Message添加到静态列表
+        leakedMessages.add(leakHandler);
+        leakedMessages.add(message);
+        
+        // 发送到队列（60秒后执行）
+        leakHandler.sendMessageDelayed(message, 60000);
+        
+        leakBatchCount++;
+        updateStatus();
+        showToast("创建Handler/Message泄露\n已创建非静态内部类Handler，持有Activity引用");
+    }
+    
+    /**
+     * 非静态内部类Handler，隐式持有外部类（MainActivity）引用
+     * 当Handler被静态引用持有时，即使MainActivity被销毁，Handler仍然持有MainActivity引用
+     */
+    class LeakHandler extends Handler {
+        public LeakHandler() {
+            super(Looper.getMainLooper());
+        }
+        
+        @Override
+        public void handleMessage(Message msg) {
+            // Handler持有MainActivity引用（通过非静态内部类）
+        }
+    }
+    
+    /**
+     * 用于测试Handler/Message泄露的Activity
+     * 参考LeakCanary：创建非静态内部类Handler，持有Activity引用
+     * Message.target会持有Handler，Handler持有Activity，形成泄露链
+     */
+    public static class LeakedHandlerMessageActivity extends AppCompatActivity {
+        // 静态列表，用于持有Handler引用（确保泄露对象不被回收）
+        private static List<Object> messageLeakList;
+        
+        public static void setMessageLeakList(List<Object> list) {
+            messageLeakList = list;
+        }
+        
+        // 非静态内部类Handler，隐式持有Activity引用
+        // 注意：匿名内部类Handler的类名格式为：OuterClass$数字（如：LeakedHandlerMessageActivity$1）
+        private Handler leakHandler = new Handler(Looper.getMainLooper()) {
+            @Override
+            public void handleMessage(Message msg) {
+                // Handler持有Activity引用（通过非静态内部类）
+                // Message.target持有Handler，形成泄露链
+                // 注意：这里不处理消息，让Message一直留在队列中
+            }
+        };
+        
+        @Override
+        protected void onCreate(Bundle savedInstanceState) {
+            super.onCreate(savedInstanceState);
+            
+            // 创建Message
+            Message message = leakHandler.obtainMessage();
+            message.obj = this; // obj也持有Activity引用
+            message.what = 1;
+            
+            // 将Handler添加到静态列表（确保Handler不被回收）
+            // Handler是非静态内部类，隐式持有Activity引用
+            if (messageLeakList != null) {
+                messageLeakList.add(leakHandler);
+                messageLeakList.add(message);
+            }
+            
+            // 发送到队列（造成泄露）
+            // 使用较长的延迟时间，确保Message在Activity finish后仍在队列中
+            leakHandler.sendMessageDelayed(message, 60000); // 60秒延迟
+            
+            // 延迟finish，先返回MainActivity，确保应用不退出
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                // 返回MainActivity
+                Intent intent = new Intent(this, MainActivity.class);
+                intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                startActivity(intent);
+                // 然后finish
+                finish();
+            }, 500);
+        }
+    }
+
+    // ==================== BroadcastReceiver泄露 ====================
+
+    /**
+     * 创建BroadcastReceiver泄露
+     * 直接在MainActivity中创建非静态内部类BroadcastReceiver，持有MainActivity引用
+     * 将BroadcastReceiver添加到静态列表，确保不被回收
+     */
+    private void createBroadcastReceiverLeak() {
+        // 创建非静态内部类BroadcastReceiver（隐式持有MainActivity引用）
+        // 类名格式：com.koom.leak.MainActivity$LeakBroadcastReceiver
+        LeakBroadcastReceiver leakReceiver = new LeakBroadcastReceiver();
+        
+        // 将BroadcastReceiver添加到静态列表
+        leakedReceivers.add(leakReceiver);
+        
+            // 注册BroadcastReceiver（但不会注销，造成泄露）
+            // Android 13+ 要求指定 RECEIVER_NOT_EXPORTED 标志
+            IntentFilter filter = new IntentFilter("com.koom.leak.TEST_ACTION");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(leakReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(leakReceiver, filter);
+            }
+        
+        leakBatchCount++;
+        updateStatus();
+        showToast("创建BroadcastReceiver泄露\n已创建非静态内部类BroadcastReceiver，持有Activity引用");
+    }
+    
+    /**
+     * 非静态内部类BroadcastReceiver，隐式持有外部类（MainActivity）引用
+     */
+    class LeakBroadcastReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            // BroadcastReceiver持有MainActivity引用（通过非静态内部类）
+        }
+    }
+    
+    /**
+     * 用于测试BroadcastReceiver泄露的Activity
+     * 参考LeakCanary：注册BroadcastReceiver但未注销，BroadcastReceiver的mContext持有Activity引用
+     */
+    public static class LeakedBroadcastReceiverActivity extends AppCompatActivity {
+        // 静态列表，用于持有BroadcastReceiver引用
+        private static List<Object> receiverLeakList;
+        
+        public static void setReceiverLeakList(List<Object> list) {
+            receiverLeakList = list;
+        }
+        
+        // 非静态内部类BroadcastReceiver，隐式持有Activity引用
+        // 注意：匿名内部类BroadcastReceiver的类名格式为：OuterClass$数字（如：LeakedBroadcastReceiverActivity$1）
+        private BroadcastReceiver leakReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                // BroadcastReceiver持有Activity引用（通过非静态内部类）
+                // mContext也会持有Activity引用
+            }
+        };
+        
+        @Override
+        protected void onCreate(Bundle savedInstanceState) {
+            super.onCreate(savedInstanceState);
+            
+            // 将BroadcastReceiver添加到静态列表（确保不被回收）
+            if (receiverLeakList != null) {
+                receiverLeakList.add(leakReceiver);
+            }
+            
+            // 注册BroadcastReceiver但未注销（造成泄露）
+            // BroadcastReceiver的mContext会持有Activity引用
+            IntentFilter filter = new IntentFilter("com.koom.leak.TEST_ACTION");
+            registerReceiver(leakReceiver, filter);
+            
+            // 延迟finish，先返回MainActivity，确保应用不退出
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                // 返回MainActivity
+                Intent intent = new Intent(this, MainActivity.class);
+                intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                startActivity(intent);
+                // 然后finish（不调用unregisterReceiver，让BroadcastReceiver泄露）
+                finish();
+            }, 500);
+        }
+    }
+
+    // ==================== Animator泄露 ====================
+
+    /**
+     * 创建Animator泄露
+     * 创建无限循环的ObjectAnimator，持有View/Activity引用
+     */
+    private void createAnimatorLeak() {
+        // 创建View
+        View view = new View(this);
+        
+        // 创建无限循环的ObjectAnimator
+        ObjectAnimator animator = ObjectAnimator.ofFloat(view, "alpha", 0f, 1f);
+        animator.setRepeatCount(ValueAnimator.INFINITE);
+        animator.setDuration(1000);
+        animator.start();
+        
+        // 静态引用持有（造成泄露）
+        leakedAnimators.add(animator);
+        
+        leakBatchCount++;
+        updateStatus();
+        showToast("创建Animator泄露 (无限循环)");
+    }
+
     // ==================== Fragment泄露 ====================
 
     /**
      * 创建Fragment泄露
-     * 添加Fragment到Activity，然后立即移除，但通过静态引用持有Fragment
+     * 参考KOOM/LeakCanary的做法：创建一个新Activity，在其中添加Fragment，然后finish Activity
+     * 这样Fragment会随着Activity销毁而分离（mFragmentManager被清空），但仍被静态引用持有
      */
     private void createFragmentLeak() {
-        // 创建Fragment实例
-        TestFragment fragment = new TestFragment();
-
-        // 添加到Activity以触发完整的生命周期
-        getFragmentManager().beginTransaction()
-                .replace(android.R.id.content, fragment)
-                .commitAllowingStateLoss();
-
-        // 等待Fragment完全加载
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                // 移除Fragment，但通过静态引用持有
-                getFragmentManager().beginTransaction()
-                        .remove(fragment)
-                        .commitAllowingStateLoss();
-
-                // 创建静态引用持有Fragment（造成泄露）
-                FragmentHolder holder = new FragmentHolder(fragment);
-                fragmentLeakList.add(holder);
-
-                leakBatchCount++;
-                updateStatus();
-                showToast("创建Fragment泄露");
-            }
-        }, 500);
+        // 设置静态列表，用于持有Fragment
+        LeakedFragmentActivity.setFragmentLeakList(fragmentLeakList);
+        
+        // 启动新Activity，在其中创建Fragment并立即finish
+        Intent intent = new Intent(this, LeakedFragmentActivity.class);
+        startActivity(intent);
+        
+        leakBatchCount++;
+        updateStatus();
+        showToast("创建Fragment泄露\n提示：退出app后重新打开，然后dump hprof");
+    }
+    
+    /**
+     * 用于测试Fragment泄露的Activity
+     * 参考KOOM ActivityLeakMaker的做法：在onCreate中创建Fragment并添加到静态列表，然后立即finish
+     * 这样Fragment会随着Activity销毁而分离（mFragmentManager被清空），但仍被静态引用持有
+     */
+    public static class LeakedFragmentActivity extends AppCompatActivity {
+        private static List<FragmentHolder> fragmentLeakList;
+        
+        public static void setFragmentLeakList(List<FragmentHolder> list) {
+            fragmentLeakList = list;
+        }
+        
+        @Override
+        protected void onCreate(Bundle savedInstanceState) {
+            super.onCreate(savedInstanceState);
+            
+            // 创建Fragment实例
+            TestFragment fragment = new TestFragment();
+            
+            // 添加到Activity以触发完整的生命周期
+            getFragmentManager().beginTransaction()
+                    .replace(android.R.id.content, fragment)
+                    .commitAllowingStateLoss();
+            
+            // 立即将Fragment添加到静态列表（造成泄露）
+            // 然后finish Activity，Fragment会随着Activity销毁而分离（mFragmentManager被清空）
+            FragmentHolder holder = new FragmentHolder(fragment);
+            fragmentLeakList.add(holder);
+            
+            // finish Activity，Fragment会随着Activity销毁而分离
+            finish();
+        }
     }
 
     /**
      * 处理Intent触发的泄露（用于自动化测试）
      * 支持的action:
      * - com.koom.leak.action.BITMAP_LEAK
+     * - com.koom.leak.action.MULTIPLE_BITMAP_LEAK
+     * - com.koom.leak.action.HUGE_BITMAP_LEAK
      * - com.koom.leak.action.BYTEARRAY_LEAK
      * - com.koom.leak.action.DUPLICATE_THREAD_LEAK
+     * - com.koom.leak.action.MULTIPLE_DUPLICATE_THREAD_LEAK
      * - com.koom.leak.action.FRAGMENT_LEAK
      * - com.koom.leak.action.ACTIVITY_LEAK_AND_EXIT
+     * - com.koom.leak.action.VIEW_LEAK
+     * - com.koom.leak.action.VIEWMODEL_LEAK
+     * - com.koom.leak.action.SERVICE_LEAK
+     * - com.koom.leak.action.DIALOG_LEAK
+     * - com.koom.leak.action.HANDLER_MESSAGE_LEAK
+     * - com.koom.leak.action.BROADCAST_RECEIVER_LEAK
+     * - com.koom.leak.action.ANIMATOR_LEAK
      */
     private void handleIntentLeak() {
         Intent intent = getIntent();
@@ -939,6 +1372,34 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }, 500);
                 break;
+            case "com.koom.leak.action.VIEW_LEAK":
+                createViewLeak();
+                showToast("已触发View泄露");
+                break;
+            case "com.koom.leak.action.VIEWMODEL_LEAK":
+                createViewModelLeak();
+                showToast("已触发ViewModel泄露");
+                break;
+            case "com.koom.leak.action.SERVICE_LEAK":
+                createServiceLeak();
+                showToast("已触发Service泄露");
+                break;
+            case "com.koom.leak.action.DIALOG_LEAK":
+                createDialogLeak();
+                showToast("已触发Dialog泄露");
+                break;
+            case "com.koom.leak.action.HANDLER_MESSAGE_LEAK":
+                createHandlerMessageLeak();
+                showToast("已触发Handler/Message泄露");
+                break;
+            case "com.koom.leak.action.BROADCAST_RECEIVER_LEAK":
+                createBroadcastReceiverLeak();
+                showToast("已触发BroadcastReceiver泄露");
+                break;
+            case "com.koom.leak.action.ANIMATOR_LEAK":
+                createAnimatorLeak();
+                showToast("已触发Animator泄露");
+                break;
         }
     }
 
@@ -950,6 +1411,45 @@ public class MainActivity extends AppCompatActivity {
 
         FragmentHolder(android.app.Fragment fragment) {
             this.fragment = fragment;
+        }
+    }
+
+    /**
+     * 测试用ViewModel
+     */
+    private static class TestViewModel extends ViewModel {
+        private boolean cleared = false;
+
+        void markCleared() {
+            cleared = true;
+        }
+
+        @Override
+        protected void onCleared() {
+            super.onCleared();
+            cleared = true;
+        }
+    }
+
+    /**
+     * 测试用Service
+     */
+    private static class TestService extends Service {
+        private boolean destroyed = false;
+
+        void markDestroyed() {
+            destroyed = true;
+        }
+
+        @Override
+        public void onDestroy() {
+            super.onDestroy();
+            destroyed = true;
+        }
+
+        @Override
+        public android.os.IBinder onBind(Intent intent) {
+            return null;
         }
     }
 

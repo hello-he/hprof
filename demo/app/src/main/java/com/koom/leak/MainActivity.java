@@ -43,6 +43,7 @@ public class MainActivity extends AppCompatActivity {
     private static List<ActivityHolder> activityLeakList = new ArrayList<>();
     private static List<Object> staticLeakList = new ArrayList<>();
     private static List<Drawable> drawableLeakList = new ArrayList<>();
+    private static List<FragmentHolder> fragmentLeakList = new ArrayList<>();
 
     private Handler handler = new Handler(Looper.getMainLooper());
     private int leakBatchCount = 0;
@@ -127,9 +128,10 @@ public class MainActivity extends AppCompatActivity {
         addLeakButton(layout, "🔥 多组重复线程 (5种x10 可被统计)", v -> createMultipleDuplicateThreadLeak());
         addLeakButton(layout, "🔥 增长型重复线程 (+10 可被统计)", v -> createGrowingDuplicateThreadLeak());
 
-        // ========== Activity/Context泄露 ==========
-        addSectionTitle(layout, "🏠 Activity/Context泄露");
+        // ========== Activity/Fragment泄露 ==========
+        addSectionTitle(layout, "🏠 Activity/Fragment泄露");
         addLeakButton(layout, "🔥 Activity泄露 (可被检测)", v -> createActivityLeakAndExit());
+        addLeakButton(layout, "🔥 Fragment泄露 (可被检测)", v -> createFragmentLeak());
 
         TextView activityTipText = new TextView(this);
         activityTipText.setText("💡 说明：点击后会退出app，重新打开可检测到泄露");
@@ -541,6 +543,7 @@ public class MainActivity extends AppCompatActivity {
         activityLeakList.clear();
         staticLeakList.clear();
         drawableLeakList.clear();
+        fragmentLeakList.clear();
 
         // 停止并清空线程
         for (LeakRunnable runnable : leakedRunnables) {
@@ -840,12 +843,48 @@ public class MainActivity extends AppCompatActivity {
         showToast("创建增长型重复线程: +10个 (共" + growingThreads.size() + "个)");
     }
 
+    // ==================== Fragment泄露 ====================
+
+    /**
+     * 创建Fragment泄露
+     * 添加Fragment到Activity，然后立即移除，但通过静态引用持有Fragment
+     */
+    private void createFragmentLeak() {
+        // 创建Fragment实例
+        TestFragment fragment = new TestFragment();
+
+        // 添加到Activity以触发完整的生命周期
+        getFragmentManager().beginTransaction()
+                .replace(android.R.id.content, fragment)
+                .commitAllowingStateLoss();
+
+        // 等待Fragment完全加载
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                // 移除Fragment，但通过静态引用持有
+                getFragmentManager().beginTransaction()
+                        .remove(fragment)
+                        .commitAllowingStateLoss();
+
+                // 创建静态引用持有Fragment（造成泄露）
+                FragmentHolder holder = new FragmentHolder(fragment);
+                fragmentLeakList.add(holder);
+
+                leakBatchCount++;
+                updateStatus();
+                showToast("创建Fragment泄露");
+            }
+        }, 500);
+    }
+
     /**
      * 处理Intent触发的泄露（用于自动化测试）
      * 支持的action:
      * - com.koom.leak.action.BITMAP_LEAK
      * - com.koom.leak.action.BYTEARRAY_LEAK
      * - com.koom.leak.action.DUPLICATE_THREAD_LEAK
+     * - com.koom.leak.action.FRAGMENT_LEAK
      * - com.koom.leak.action.ACTIVITY_LEAK_AND_EXIT
      */
     private void handleIntentLeak() {
@@ -882,6 +921,15 @@ public class MainActivity extends AppCompatActivity {
                 createMultipleDuplicateThreadLeak();
                 showToast("已触发多组重复线程泄露");
                 break;
+            case "com.koom.leak.action.FRAGMENT_LEAK":
+                // 延迟执行，确保UI已经渲染
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        createFragmentLeak();
+                    }
+                }, 500);
+                break;
             case "com.koom.leak.action.ACTIVITY_LEAK_AND_EXIT":
                 // 延迟执行，确保UI已经渲染
                 handler.postDelayed(new Runnable() {
@@ -891,6 +939,17 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }, 500);
                 break;
+        }
+    }
+
+    /**
+     * Fragment持有者，用于测试Fragment泄露
+     */
+    private static class FragmentHolder {
+        private final android.app.Fragment fragment;
+
+        FragmentHolder(android.app.Fragment fragment) {
+            this.fragment = fragment;
         }
     }
 

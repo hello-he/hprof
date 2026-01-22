@@ -155,6 +155,17 @@ verify_leaks() {
         fi
     fi
 
+    # 检查Fragment泄露
+    if [[ "$expected_leaks" == *"fragment"* ]]; then
+        if grep -q "TestFragment" "$output_file" || grep -q "fragmentLeakList" "$output_file"; then
+            print_success "检测到Fragment泄露"
+            ((passed++))
+        else
+            print_error "未检测到Fragment泄露"
+            ((failed++))
+        fi
+    fi
+
     # 检查重复线程名
     if [[ "$expected_leaks" == *"duplicate_threads"* ]]; then
         local thread_count=$(grep -oP "WorkerThread: \K\d+" "$output_file" || echo "0")
@@ -267,6 +278,15 @@ test_activity_leak() {
     analyze_heap "$TEST_OUTPUT_DIR/test_activity_leak.hprof" "activity"
 }
 
+# 测试用例：Fragment泄露
+test_fragment_leak() {
+    print_test "Fragment泄露检测"
+
+    trigger_leak "com.koom.leak.action.FRAGMENT_LEAK" "Fragment泄露"
+    dump_heap "test_fragment_leak.hprof"
+    analyze_heap "$TEST_OUTPUT_DIR/test_fragment_leak.hprof" "fragment"
+}
+
 # 运行所有测试
 run_all_tests() {
     print_info "开始运行所有测试..."
@@ -284,6 +304,7 @@ run_all_tests() {
         "test_duplicate_thread_leak"
         "test_multiple_duplicate_thread_leak"
         "test_activity_leak"
+        "test_fragment_leak"
     )
 
     for test in "${tests[@]}"; do
@@ -347,11 +368,14 @@ main() {
             activity)
                 test_activity_leak
                 ;;
+            fragment)
+                test_fragment_leak
+                ;;
             all)
                 run_all_tests
                 ;;
             *)
-                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_threads|multiple_threads|activity|all]"
+                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_threads|multiple_threads|activity|fragment|all]"
                 exit 1
                 ;;
         esac

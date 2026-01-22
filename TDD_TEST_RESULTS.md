@@ -47,6 +47,12 @@
 - **检测条件**: 已销毁但被GC Root引用
 - **测试结果**: ✅ 通过 - 检测到MainActivity泄露
 
+### 8. Fragment泄露 (可被检测)
+- **测试用例**: `com.koom.leak.action.FRAGMENT_LEAK`
+- **泄露描述**: 添加Fragment到Activity，移除后通过静态引用持有
+- **检测条件**: 已移除但被GC Root引用
+- **测试结果**: ✅ 通过 - 检测到TestFragment泄露
+
 ## 使用方法
 
 ### 运行单个测试
@@ -56,6 +62,7 @@ bash test_leaks.sh bitmap           # 测试Bitmap泄露
 bash test_leaks.sh bytearray        # 测试ByteArray泄露
 bash test_leaks.sh duplicate_threads # 测试重复线程名
 bash test_leaks.sh activity         # 测试Activity泄露
+bash test_leaks.sh fragment         # 测试Fragment泄露
 ```
 
 ### 运行所有测试
@@ -91,7 +98,8 @@ bash test_leaks.sh all
 
 | 泄露类型 | 检测方式 | 状态 |
 |---------|---------|------|
-| Activity/Fragment泄露 | GC Root分析 | ✅ 支持 |
+| Activity泄露 | GC Root分析 | ✅ 支持 |
+| Fragment泄露 | GC Root分析 | ✅ 支持 |
 | 大Bitmap泄露 | 像素计数 (>1M) | ✅ 支持 |
 | 大ByteArray泄露 | 大小检查 (>1MB) | ✅ 支持 |
 | 重复线程名 | 统计显示 | ✅ 支持 |

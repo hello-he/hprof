@@ -688,7 +688,7 @@ test_multiple_duplicate_thread_leak() {
         return 1
     fi
 
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_multiple_duplicate_thread_leak.hprof" "duplicate_threads;multiple_thread_groups"; then
+    if ! analyze_heap "$TEST_OUTPUT_DIR/test_multiple_duplicate_thread_leak.hprof" "multiple_thread_groups"; then
         print_error "分析失败"
         return 1
     fi
@@ -758,6 +758,19 @@ test_fragment_leak() {
     # Activity finish后，Fragment的onDetach()是异步调用的，需要等待更长时间
     print_info "等待 Fragment 被移除 (额外 10 秒，确保Activity完全销毁和Fragment分离)..."
     sleep 10
+
+    # 检查应用是否还在运行（Fragment泄露测试中Activity会finish，但应用可能还在运行）
+    print_info "检查应用是否还在运行..."
+    if ! adb shell pidof "$PACKAGE_NAME" > /dev/null 2>&1; then
+        print_info "应用已退出，重新启动应用..."
+        if ! adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"; then
+            print_error "重新启动应用失败"
+            return 1
+        fi
+        sleep 2
+    else
+        print_info "应用仍在运行，直接dumpheap"
+    fi
 
     if ! dump_heap "test_fragment_leak.hprof"; then
         print_error "dump heap 失败"

@@ -177,6 +177,10 @@ public class MainActivity extends AppCompatActivity {
 
         scrollView.addView(layout);
         setContentView(scrollView);
+
+        // 处理Intent触发泄露（用于自动化测试）
+        // 必须在setContentView之后调用，因为此时UI元素已初始化
+        handleIntentLeak();
     }
 
     private void addSectionTitle(LinearLayout layout, String title) {
@@ -834,6 +838,60 @@ public class MainActivity extends AppCompatActivity {
         leakBatchCount += 10;
         updateStatus();
         showToast("创建增长型重复线程: +10个 (共" + growingThreads.size() + "个)");
+    }
+
+    /**
+     * 处理Intent触发的泄露（用于自动化测试）
+     * 支持的action:
+     * - com.koom.leak.action.BITMAP_LEAK
+     * - com.koom.leak.action.BYTEARRAY_LEAK
+     * - com.koom.leak.action.DUPLICATE_THREAD_LEAK
+     * - com.koom.leak.action.ACTIVITY_LEAK_AND_EXIT
+     */
+    private void handleIntentLeak() {
+        Intent intent = getIntent();
+        if (intent == null || intent.getAction() == null) {
+            return;
+        }
+
+        String action = intent.getAction();
+        Log.d(TAG, "handleIntentLeak: action=" + action);
+
+        switch (action) {
+            case "com.koom.leak.action.BITMAP_LEAK":
+                createBitmapLeak();
+                showToast("已触发Bitmap泄露");
+                break;
+            case "com.koom.leak.action.MULTIPLE_BITMAP_LEAK":
+                createMultipleBitmapLeak();
+                showToast("已触发多个Bitmap泄露");
+                break;
+            case "com.koom.leak.action.HUGE_BITMAP_LEAK":
+                createHugeBitmapLeak();
+                showToast("已触发超大Bitmap泄露");
+                break;
+            case "com.koom.leak.action.BYTEARRAY_LEAK":
+                createByteArrayLeak();
+                showToast("已触发ByteArray泄露");
+                break;
+            case "com.koom.leak.action.DUPLICATE_THREAD_LEAK":
+                createDuplicateThreadLeak();
+                showToast("已触发重复线程泄露");
+                break;
+            case "com.koom.leak.action.MULTIPLE_DUPLICATE_THREAD_LEAK":
+                createMultipleDuplicateThreadLeak();
+                showToast("已触发多组重复线程泄露");
+                break;
+            case "com.koom.leak.action.ACTIVITY_LEAK_AND_EXIT":
+                // 延迟执行，确保UI已经渲染
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        createActivityLeakAndExit();
+                    }
+                }, 500);
+                break;
+        }
     }
 
 }

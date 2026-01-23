@@ -221,14 +221,16 @@ analyze_heap() {
     fi
 
     # 读取文本报告（优先，因为包含更详细的信息）
-    local txt_file="$output_dir/hprof_analysis.txt"
+    # 注意：分析命令会在output_dir下创建一个带时间戳的子目录，然后在子目录中生成hprof_analysis.txt
+    local txt_file=$(find "$output_dir" -name "hprof_analysis.txt" -type f | head -1)
     if [ -f "$txt_file" ]; then
         echo "=== 文本报告内容 ===" >> "$output_file"
         cat "$txt_file" >> "$output_file"
     fi
 
     # 同时读取HTML报告（如果有）
-    local html_file="$output_dir/hprof_analysis.html"
+    # 注意：分析命令会在output_dir下创建一个带时间戳的子目录，然后在子目录中生成hprof_analysis.html
+    local html_file=$(find "$output_dir" -name "hprof_analysis.html" -type f | head -1)
     if [ -f "$html_file" ]; then
         # 将HTML内容也追加到输出文件（用于验证）
         echo "=== HTML报告内容（关键信息） ===" >> "$output_file"

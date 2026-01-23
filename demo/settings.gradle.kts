@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "LeakDemo"
 include(":app")
+include(":app-normal")

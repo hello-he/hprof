@@ -221,6 +221,13 @@ class HprofAnalyzer {
 
                         // 检查Fragment泄漏（参考LeakCanary：检查mLifecycleRegistry.state == DESTROYED）
                         if (isFragment(fragmentClass, instance)) {
+                            // 排除系统Fragment（如androidx.lifecycle.ReportFragment）
+                            val className = instance.instanceClassName
+                            if (className == "androidx.lifecycle.ReportFragment" || 
+                                (className.startsWith("android.") && !className.contains("com.koom"))) {
+                                continue
+                            }
+                            
                             var isLeaked = false
                             
                             // 优先检查AndroidX Fragment的mLifecycleRegistry.state
@@ -285,9 +292,10 @@ class HprofAnalyzer {
                                 
                                 if (!isContainedInFragmentOrActivity) {
                                     // 只有不在Fragment/Activity引用链中的Bitmap才单独报告为泄露对象
-                                    stats.leakedBitmapCount++
+                                    // 注意：不在这里增加 stats.leakedBitmapCount，而是在处理 applicationLeaks 时再增加
+                                    // 这样可以区分 applicationLeaks 和 libraryLeaks（系统类持有是正常的）
                                     leakingIds.add(instance.objectId)
-                                    logger.debug("发现大Bitmap泄露: ${instance.instanceClassName} ${width}x${height} (${pixelCount * 4 / 1024 / 1024}MB)")
+                                    logger.debug("发现大Bitmap: ${instance.instanceClassName} ${width}x${height} (${pixelCount * 4 / 1024 / 1024}MB)，等待GC Root路径分析")
                                 } else {
                                     logger.debug("大Bitmap在Fragment/Activity中，不单独报告为泄露: ${instance.instanceClassName} ${width}x${height}")
                                 }
@@ -322,12 +330,19 @@ class HprofAnalyzer {
                                         // 放宽条件：如果View是root view且已detached（即使mWindowAttachCount == 0，也可能是泄露）
                                         // 或者如果View是root view且mWindowAttachCount > 0（说明曾经attach过）
                                         if (viewDetached || mWindowAttachCount > 0) {
+                                            // 排除系统View（如DecorView、系统组件、AppCompat组件等）
+                                            val className = instance.instanceClassName
+                                            if (className.startsWith("com.android.internal.") || 
+                                                className.startsWith("androidx.") ||
+                                                (className.startsWith("android.") && !className.contains("com.koom"))) {
+                                                continue
+                                            }
+                                            
                                             // 参考 LeakCanary：只检测 isChildOfViewRootImpl 或 DecorView
                                             val viewParent = instance[VIEW_CLASS_NAME, "mParent"]?.valueAsInstance
                                             val isChildOfViewRootImpl = viewParent != null && !(viewParent instanceOf VIEW_CLASS_NAME)
-                                            val isDecorView = instance.instanceClassName == "com.android.internal.policy.DecorView"
 
-                                            if (isChildOfViewRootImpl || isDecorView || viewDetached) {
+                                            if (isChildOfViewRootImpl || viewDetached) {
                                                 val objectCounter = updateClassCounter(instance.instanceClassId)
                                                 if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
                                                     leakingIds.add(instance.objectId)
@@ -375,6 +390,12 @@ class HprofAnalyzer {
                         // 参考LeakCanary：Dialog泄露检测比较复杂，主要通过检查Dialog是否被静态引用持有
                         // 简化处理：如果Dialog被静态引用持有，且mShowing=false，就认为是泄露
                         if (isDialog(dialogClass, instance)) {
+                            // 只检测应用自己的Dialog（类名包含com.koom），排除系统Dialog
+                            val className = instance.instanceClassName
+                            if (!className.contains("com.koom")) {
+                                continue
+                            }
+                            
                             val mShowing = instance[DIALOG_CLASS_NAME, "mShowing"]?.value?.asBoolean
                             // Dialog已关闭（mShowing=false）但仍被引用，说明Dialog被泄露
                             // 注意：Dialog dismiss后，mDecor可能被清空，所以只检查mShowing
@@ -1090,6 +1111,11 @@ class HprofAnalyzer {
                 // 检查此泄露对象中包含的Bitmap
                 val bitmapInfo = bitmapMap[leakingObjectId]
                 val isLeakingBitmap = bitmapInfo != null && bitmapInfo.pixelCount >= 100_000
+
+                // 如果是Bitmap泄露，且是applicationLeaks（不是libraryLeaks），增加统计
+                if (isLeakingBitmap && bitmapInfo != null && bitmapInfo.pixelCount > 1_000_000) {
+                    stats.leakedBitmapCount++
+                }
 
                 val containedBitmaps = if (isLeakingBitmap) {
                     // 如果泄露对象本身就是Bitmap，创建空列表（后面会手动添加所有实例）

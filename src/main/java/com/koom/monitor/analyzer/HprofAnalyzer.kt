@@ -223,10 +223,12 @@ class HprofAnalyzer {
                         if (isFragment(fragmentClass, instance)) {
                             // 排除系统Fragment（如androidx.lifecycle.ReportFragment）
                             val className = instance.instanceClassName
-                            if (className == "androidx.lifecycle.ReportFragment" || 
-                                (className.startsWith("android.") && !className.contains("com.koom"))) {
+                            if (className == "androidx.lifecycle.ReportFragment") {
                                 continue
                             }
+                            
+                            // 判断是否是应用Fragment（非系统类）
+                            val isAppFragment = isAppClass(className)
                             
                             var isLeaked = false
                             
@@ -246,10 +248,21 @@ class HprofAnalyzer {
                                 val fragmentManager = instance[fragmentClass.name, FRAGMENT_MANAGER_FIELD_NAME]
                                 val isNullManager = fragmentManager?.value?.asObject == null
                                 
-                                // LeakCanary标准：只要mFragmentManager == null就认为是泄露
                                 if (isNullManager) {
+                                    // 对于native Fragment，如果mFragmentManager == null，就认为是泄露
                                     isLeaked = true
                                     logger.debug("发现泄漏Fragment: ${instance.instanceClassName} (mFragmentManager == null)")
+                                } else if (isAppFragment) {
+                                    // 对于应用Fragment，即使mFragmentManager不为null，如果Activity已销毁，也可能是泄露
+                                    // 检查Fragment的mActivity是否已销毁
+                                    val mActivity = instance[fragmentClass.name, "mActivity"]?.value?.asObject?.asInstance
+                                    val activityDestroyed = mActivity?.let { 
+                                        it[ACTIVITY_CLASS_NAME, DESTROYED_FIELD_NAME]?.value?.asBoolean == true 
+                                    } ?: false
+                                    if (activityDestroyed) {
+                                        isLeaked = true
+                                        logger.debug("发现泄漏Fragment: ${instance.instanceClassName} (mActivity destroyed but mFragmentManager != null)")
+                                    }
                                 }
                             }
                             
@@ -315,6 +328,17 @@ class HprofAnalyzer {
                                         activityContext[ACTIVITY_CLASS_NAME, DESTROYED_FIELD_NAME]?.value?.asBoolean == true
 
                                     if (mContextIsDestroyedActivity) {
+                                        // Root view with unwrapped mContext a destroyed activity.
+                                        // 排除系统View（如DecorView、系统组件、AppCompat组件等）
+                                        // 但对于应用View（非系统类），不进行过滤
+                                        // 对于系统View（如android.widget.FrameLayout），如果mContext是已销毁的Activity，也认为是泄露
+                                        // 因为应用代码可能持有系统View的引用
+                                        val className = instance.instanceClassName
+                                        val isAppView = isAppClass(className)
+                                        if (!isAppView && isSystemClass(className)) {
+                                            continue
+                                        }
+                                        
                                         val objectCounter = updateClassCounter(instance.instanceClassId)
                                         if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
                                             leakingIds.add(instance.objectId)
@@ -325,29 +349,26 @@ class HprofAnalyzer {
                                         // 参考 LeakCanary：检查 View 是否已 detached
                                         val mAttachInfoField = instance[VIEW_CLASS_NAME, "mAttachInfo"]
                                         val viewDetached = mAttachInfoField?.value?.isNullReference == true
-                                        val mWindowAttachCount = instance[VIEW_CLASS_NAME, "mWindowAttachCount"]?.value?.asInt ?: 0
-
-                                        // 放宽条件：如果View是root view且已detached（即使mWindowAttachCount == 0，也可能是泄露）
-                                        // 或者如果View是root view且mWindowAttachCount > 0（说明曾经attach过）
-                                        if (viewDetached || mWindowAttachCount > 0) {
-                                            // 排除系统View（如DecorView、系统组件、AppCompat组件等）
-                                            val className = instance.instanceClassName
-                                            if (className.startsWith("com.android.internal.") || 
-                                                className.startsWith("androidx.") ||
-                                                (className.startsWith("android.") && !className.contains("com.koom"))) {
-                                                continue
-                                            }
+                                        
+                                        if (viewDetached) {
+                                            val mWindowAttachCount = instance[VIEW_CLASS_NAME, "mWindowAttachCount"]?.value?.asInt ?: 0
                                             
-                                            // 参考 LeakCanary：只检测 isChildOfViewRootImpl 或 DecorView
-                                            val viewParent = instance[VIEW_CLASS_NAME, "mParent"]?.valueAsInstance
-                                            val isChildOfViewRootImpl = viewParent != null && !(viewParent instanceOf VIEW_CLASS_NAME)
-
-                                            if (isChildOfViewRootImpl || viewDetached) {
-                                                val objectCounter = updateClassCounter(instance.instanceClassId)
-                                                if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
-                                                    leakingIds.add(instance.objectId)
-                                                    stats.leakedViewCount++
-                                                    logger.debug("发现泄漏View: ${instance.instanceClassName} (root view, detached=$viewDetached, mWindowAttachCount=$mWindowAttachCount)")
+                                            if (mWindowAttachCount > 0) {
+                                                // 参考 LeakCanary：检查是否是 isChildOfViewRootImpl
+                                                val viewParent = instance[VIEW_CLASS_NAME, "mParent"]?.valueAsInstance
+                                                val isChildOfViewRootImpl = viewParent != null && !(viewParent instanceOf VIEW_CLASS_NAME)
+                                                
+                                                // 对于应用View（非系统类），如果已detached且mWindowAttachCount > 0，就认为是泄露
+                                                // 对于系统View，如果是isChildOfViewRootImpl，也认为是泄露
+                                                val className = instance.instanceClassName
+                                                val isAppView = isAppClass(className)
+                                                if (isAppView || (isChildOfViewRootImpl && !isSystemClass(className))) {
+                                                    val objectCounter = updateClassCounter(instance.instanceClassId)
+                                                    if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
+                                                        leakingIds.add(instance.objectId)
+                                                        stats.leakedViewCount++
+                                                        logger.debug("发现泄漏View: ${instance.instanceClassName} (root view, detached=true, mWindowAttachCount=$mWindowAttachCount, isChildOfViewRootImpl=$isChildOfViewRootImpl)")
+                                                    }
                                                 }
                                             }
                                         }
@@ -390,17 +411,13 @@ class HprofAnalyzer {
                         // 参考LeakCanary：Dialog泄露检测比较复杂，主要通过检查Dialog是否被静态引用持有
                         // 简化处理：如果Dialog被静态引用持有，且mShowing=false，就认为是泄露
                         if (isDialog(dialogClass, instance)) {
-                            // 只检测应用自己的Dialog（类名包含com.koom），排除系统Dialog
                             val className = instance.instanceClassName
-                            if (!className.contains("com.koom")) {
-                                continue
-                            }
-                            
                             val mShowing = instance[DIALOG_CLASS_NAME, "mShowing"]?.value?.asBoolean
                             // Dialog已关闭（mShowing=false）但仍被引用，说明Dialog被泄露
                             // 注意：Dialog dismiss后，mDecor可能被清空，所以只检查mShowing
                             val isDismissed = mShowing == false
 
+                            // 如果Dialog的mShowing=false，就认为是泄露（不管类名，系统Dialog和应用Dialog都检测）
                             if (isDismissed) {
                                 val objectCounter = updateClassCounter(instance.instanceClassId)
                                 if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
@@ -430,7 +447,7 @@ class HprofAnalyzer {
                             // 3. 类名包含"$"且不是android包的类
                             val isInnerClassReceiver = receiverClassName.contains("LeakBroadcastReceiver") ||
                                 receiverClassName.contains("LeakedBroadcastReceiverActivity") || 
-                                (receiverClassName.contains("$") && !receiverClassName.startsWith("android.") && 
+                                (receiverClassName.contains("$") && !isSystemClass(receiverClassName) && 
                                  receiverClassName.matches(Regex(".*\\$\\d+.*")))
                             
                             // 检查BroadcastReceiver的mContext是否引用已销毁的Activity
@@ -524,7 +541,7 @@ class HprofAnalyzer {
                                 // 2. 类名包含"$"且不是android包的类，且是内部类格式
                                 val isInnerClassHandler = handlerClassName.contains("LeakHandler") ||
                                     handlerClassName.contains("LeakedHandlerMessageActivity") || 
-                                    (handlerClassName.contains("$") && !handlerClassName.startsWith("android.") && 
+                                    (handlerClassName.contains("$") && !isSystemClass(handlerClassName) && 
                                      handlerClassName.matches(Regex(".*\\$\\d+.*")))
                                 
                                 if (isInnerClassHandler) {
@@ -583,6 +600,14 @@ class HprofAnalyzer {
                                         
                                         val handlerClassName = targetInstance.instanceClassName
                                         
+                                        // 先检查是否是系统Handler，如果是系统Handler，跳过这个Message的泄露检测
+                                        val isSystemHandler = isSystemClass(handlerClassName)
+                                        
+                                        // 如果是系统Handler，跳过这个Message的泄露检测（系统Handler持有的Message不应该标记为泄露）
+                                        if (isSystemHandler) {
+                                            continue
+                                        }
+                                        
                                         // 调试：记录所有Handler类名（用于查找我们的Handler）
                                         if (handlerClassName.contains("LeakedHandlerMessageActivity") || 
                                             handlerClassName.contains("LeakedBroadcastReceiverActivity") ||
@@ -598,7 +623,7 @@ class HprofAnalyzer {
                                         // 非静态内部类的类名格式：OuterClass$数字（如：LeakedHandlerMessageActivity$1）
                                         // 或者Handler类名包含Activity类名
                                         val isInnerClassHandler = handlerClassName.contains("LeakedHandlerMessageActivity") || 
-                                            (handlerClassName.contains("$") && !handlerClassName.startsWith("android.") && 
+                                            (handlerClassName.contains("$") && !isSystemClass(handlerClassName) && 
                                              handlerClassName.matches(Regex(".*\\$\\d+.*")))
                                         
                                         if (isInnerClassHandler) {
@@ -636,29 +661,42 @@ class HprofAnalyzer {
                                 
                                 // 方法2：检查Message.obj是否持有Activity引用（作为补充检测，如果target检查没有发现泄露）
                                 if (!leakingIds.contains(instance.objectId)) {
-                                    val obj = instance[MESSAGE_CLASS_NAME, "obj"]?.value?.asObject
-                                    if (obj != null) {
-                                        val objInstance = obj.asInstance
-                                        if (objInstance != null && isActivity(activityClass, objInstance)) {
-                                            messageWithActivityObjCount++
-                                            val destroyed = objInstance[ACTIVITY_CLASS_NAME, DESTROYED_FIELD_NAME]?.value?.asBoolean
-                                            // 如果Message.obj持有Activity引用，也认为是泄露
-                                            val objectCounter = updateClassCounter(instance.instanceClassId)
-                                            if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
-                                                leakingIds.add(instance.objectId)
-                                                stats.leakedHandlerMessageCount++
-                                                logger.info("发现泄漏Handler/Message: Message.obj holds activity (destroyed=$destroyed, className=${objInstance.instanceClassName})")
-                                            }
-                                        }
-                                        // 检查obj是否是Dialog
-                                        else if (objInstance != null && isDialog(dialogClass, objInstance)) {
-                                            val mShowing = objInstance[DIALOG_CLASS_NAME, "mShowing"]?.value?.asBoolean
-                                            if (mShowing == false) {
+                                    // 先检查Message.target是否是系统Handler，如果是系统Handler，不应该标记为泄露
+                                    val target = instance[MESSAGE_CLASS_NAME, "target"]?.value?.asObject
+                                    val targetInstance = target?.asInstance
+                                    val isSystemHandler = if (targetInstance != null) {
+                                        val handlerClassName = targetInstance.instanceClassName
+                                        isSystemClass(handlerClassName)
+                                    } else {
+                                        false
+                                    }
+                                    
+                                    // 如果是系统Handler，跳过这个Message的泄露检测（系统Handler持有的Message不应该标记为泄露）
+                                    if (!isSystemHandler) {
+                                        val obj = instance[MESSAGE_CLASS_NAME, "obj"]?.value?.asObject
+                                        if (obj != null) {
+                                            val objInstance = obj.asInstance
+                                            if (objInstance != null && isActivity(activityClass, objInstance)) {
+                                                messageWithActivityObjCount++
+                                                val destroyed = objInstance[ACTIVITY_CLASS_NAME, DESTROYED_FIELD_NAME]?.value?.asBoolean
+                                                // 如果Message.obj持有Activity引用，且target不是系统Handler，认为是泄露
                                                 val objectCounter = updateClassCounter(instance.instanceClassId)
                                                 if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
                                                     leakingIds.add(instance.objectId)
                                                     stats.leakedHandlerMessageCount++
-                                                    logger.debug("发现泄漏Handler/Message: Message.obj holds dismissed dialog")
+                                                    logger.info("发现泄漏Handler/Message: Message.obj holds activity (destroyed=$destroyed, className=${objInstance.instanceClassName}, handlerClass=${targetInstance?.instanceClassName})")
+                                                }
+                                            }
+                                            // 检查obj是否是Dialog
+                                            else if (objInstance != null && isDialog(dialogClass, objInstance)) {
+                                                val mShowing = objInstance[DIALOG_CLASS_NAME, "mShowing"]?.value?.asBoolean
+                                                if (mShowing == false) {
+                                                    val objectCounter = updateClassCounter(instance.instanceClassId)
+                                                    if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
+                                                        leakingIds.add(instance.objectId)
+                                                        stats.leakedHandlerMessageCount++
+                                                        logger.debug("发现泄漏Handler/Message: Message.obj holds dismissed dialog")
+                                                    }
                                                 }
                                             }
                                         }
@@ -698,7 +736,7 @@ class HprofAnalyzer {
                     buildLeakingObjects(
                         heapAnalysis, graph, stats, bitmapMap, bitmapOutputDir,
                         activityClass, fragmentClass, bitmapClass, viewClass,
-                        viewModelClass, serviceClass, dialogClass, objectAnimatorClass, valueAnimatorClass
+                        viewModelClass, serviceClass, dialogClass, broadcastReceiverClass, objectAnimatorClass, valueAnimatorClass
                     )
                 }
                 is kshark.HeapAnalysisFailure -> {
@@ -921,6 +959,7 @@ class HprofAnalyzer {
         viewModelClass: HeapClass?,
         serviceClass: HeapClass?,
         dialogClass: HeapClass?,
+        broadcastReceiverClass: HeapClass?,
         objectAnimatorClass: HeapClass?,
         valueAnimatorClass: HeapClass?
     ): String {
@@ -1013,13 +1052,48 @@ class HprofAnalyzer {
             }
         }
 
+        // BroadcastReceiver泄露
+        if (broadcastReceiverClass != null && isBroadcastReceiver(broadcastReceiverClass, instance)) {
+            val mContextField = instance[BROADCAST_RECEIVER_CLASS_NAME, "mContext"]
+            if (mContextField != null && mContextField.value.isNonNullReference) {
+                val mContext = mContextField.value.asObject!!.asInstance!!
+                val activityContext = mContext.unwrapActivityContext(graph)
+                val destroyed = activityContext?.let { 
+                    it[ACTIVITY_CLASS_NAME, DESTROYED_FIELD_NAME]?.value?.asBoolean 
+                } ?: false
+                if (activityContext != null) {
+                    return "BroadcastReceiver Leak: mContext references ${if (destroyed == true) "destroyed " else ""}activity but still reachable"
+                }
+            }
+            // 检查是否是Activity的内部类
+            val receiverClassName = instance.instanceClassName
+            val isInnerClassReceiver = receiverClassName.contains("$") && 
+                !receiverClassName.startsWith("android.") &&
+                receiverClassName.matches(Regex(".*\\$.*"))
+            if (isInnerClassReceiver) {
+                return "BroadcastReceiver Leak: inner class of Activity holds reference"
+            }
+            return "BroadcastReceiver Leak: registered but not unregistered"
+        }
+
         // Animator泄露
         if ((objectAnimatorClass != null && isObjectAnimator(objectAnimatorClass, instance)) ||
             (valueAnimatorClass != null && isValueAnimator(valueAnimatorClass, instance))) {
-            val mRunning = instance[ANIMATOR_CLASS_NAME, "mRunning"]?.value?.asBoolean == true
             val mRepeatCount = instance[VALUE_ANIMATOR_CLASS_NAME, "mRepeatCount"]?.value?.asInt
-            if (mRunning && mRepeatCount == -1) {
-                return "Animator Leak: infinite animator holds reference"
+            // 与检测逻辑一致：只要mRepeatCount == -1就认为是泄露（无限循环动画）
+            // 即使Animator已经停止，如果被静态引用持有，也是泄露
+            if (mRepeatCount == -1) {
+                val mRunning = instance[ANIMATOR_CLASS_NAME, "mRunning"]?.value?.asBoolean == true
+                if (mRunning) {
+                    return "Animator Leak: infinite animator is running and holds reference"
+                } else {
+                    return "Animator Leak: infinite animator holds reference (stopped but still reachable)"
+                }
+            } else {
+                // 即使不是无限循环，如果Animator被静态引用持有，也可能是泄露
+                // 但为了减少误报，只对无限循环动画进行检测
+                // 这里返回更通用的原因
+                return "Animator Leak: animator holds reference"
             }
         }
 
@@ -1047,6 +1121,7 @@ class HprofAnalyzer {
         viewModelClass: HeapClass?,
         serviceClass: HeapClass?,
         dialogClass: HeapClass?,
+        broadcastReceiverClass: HeapClass?,
         objectAnimatorClass: HeapClass?,
         valueAnimatorClass: HeapClass?
     ): List<LeakingObject> {
@@ -1107,6 +1182,23 @@ class HprofAnalyzer {
             if (appLeak.leakTraces.isNotEmpty()) {
                 val leakTrace = appLeak.leakTraces[0]
                 val leakingObjectId = leakTrace.leakingObject.objectId
+                val leakingObject = leakTrace.leakingObject
+                
+                // 过滤系统Handler的Message：如果泄露对象是Message，且target是系统Handler，跳过
+                if (leakingObject.className == "android.os.Message") {
+                    val messageInstance = graph.findObjectById(leakingObjectId) as? HeapInstance
+                    if (messageInstance != null) {
+                        val target = messageInstance["android.os.Message", "target"]?.value?.asObject?.asInstance
+                        if (target != null) {
+                            val handlerClassName = target.instanceClassName
+                            val isSystemHandler = isSystemClass(handlerClassName)
+                            if (isSystemHandler) {
+                                // 系统Handler的Message不应该标记为泄露，跳过
+                                continue
+                            }
+                        }
+                    }
+                }
 
                 // 检查此泄露对象中包含的Bitmap
                 val bitmapInfo = bitmapMap[leakingObjectId]
@@ -1173,7 +1265,7 @@ class HprofAnalyzer {
                 val leakReason = determineLeakReason(
                     graph, leakingObjectId, leakTrace.leakingObject.className,
                     activityClass, fragmentClass, bitmapClass, viewClass,
-                    viewModelClass, serviceClass, dialogClass, objectAnimatorClass, valueAnimatorClass
+                    viewModelClass, serviceClass, dialogClass, broadcastReceiverClass, objectAnimatorClass, valueAnimatorClass
                 )
 
                 results.add(
@@ -1254,7 +1346,7 @@ class HprofAnalyzer {
                 val leakReason = determineLeakReason(
                     graph, leakingObjectId, leakTrace.leakingObject.className,
                     activityClass, fragmentClass, bitmapClass, viewClass,
-                    viewModelClass, serviceClass, dialogClass, objectAnimatorClass, valueAnimatorClass
+                    viewModelClass, serviceClass, dialogClass, broadcastReceiverClass, objectAnimatorClass, valueAnimatorClass
                 )
 
                 results.add(
@@ -1434,6 +1526,27 @@ class HprofAnalyzer {
         // 也检查类名是否包含Message（处理自定义Message子类的情况）
         return instance.instanceClassName == "android.os.Message" || 
                instance.instanceClassName.contains("Message", ignoreCase = true)
+    }
+
+    /**
+     * 判断是否是系统类（Android系统类）
+     * 系统类包括：android.*, com.android.*, androidx.*, com.android.internal.* 等
+     */
+    private fun isSystemClass(className: String): Boolean {
+        return className.startsWith("android.") ||
+            className.startsWith("com.android.") ||
+            className.startsWith("androidx.") ||
+            className.startsWith("com.android.internal.") ||
+            className.contains("ActivityThread") ||
+            className.contains("FrameworkHandler") ||
+            className.contains("SystemHandler")
+    }
+
+    /**
+     * 判断是否是应用类（非系统类）
+     */
+    private fun isAppClass(className: String): Boolean {
+        return !isSystemClass(className)
     }
 
     private fun isBroadcastReceiver(receiverClass: HeapClass?, instance: HeapInstance): Boolean {

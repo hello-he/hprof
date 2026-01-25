@@ -236,13 +236,22 @@ class AdbClient(
     /**
      * 执行dump heap
      * @param includeBitmaps 是否包含Bitmap数据 (Android 14+, 使用 -b png)
+     * @param gzip 是否使用gzip压缩 (使用 -g)
      */
-    fun dumpHeap(packageName: String, outputPath: String, includeBitmaps: Boolean = true): ProcessResult {
+    fun dumpHeap(packageName: String, outputPath: String, includeBitmaps: Boolean = true, gzip: Boolean = true): ProcessResult {
         // 确保输出目录存在
         shell("mkdir -p ${outputPath.substringBeforeLast('/')}")
 
-        val bitmapOption = if (includeBitmaps) "-b png " else ""
-        val cmd = "am dumpheap $bitmapOption$packageName $outputPath"
+        val options = mutableListOf<String>()
+        if (gzip) {
+            options.add("-g")
+        }
+        if (includeBitmaps) {
+            options.add("-b")
+            options.add("png")
+        }
+        val optionsStr = if (options.isNotEmpty()) "${options.joinToString(" ")} " else ""
+        val cmd = "am dumpheap $optionsStr$packageName $outputPath"
         logger.info("执行: $cmd")
         return shell(cmd)
     }

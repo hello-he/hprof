@@ -142,6 +142,8 @@ class WatchCommand : Runnable {
         println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
         val previousSnapshots = mutableMapOf<String, MetricsSnapshot>()
+        // 记录每个包名是否已经dump过（参考KOOM，防止频繁dump）
+        val hasDumped = mutableMapOf<String, Boolean>()
         var iteration = 0
 
         while (config.maxIterations == 0 || iteration < config.maxIterations) {
@@ -181,8 +183,14 @@ class WatchCommand : Runnable {
                     println("   ⚠️  超过阈值: ${reasons.joinToString(", ")}")
 
                     if (config.autoDump) {
-                        println("   🔔 触发dump...")
-                        performDump(snapshot, adb, config)
+                        // 参考KOOM，每个包名只dump一次，防止频繁dump
+                        if (hasDumped[packageName] != true) {
+                            println("   🔔 触发dump...")
+                            performDump(snapshot, adb, config)
+                            hasDumped[packageName] = true
+                        } else {
+                            println("   ℹ️  已dump过，跳过（防止频繁dump）")
+                        }
                     }
                 }
 

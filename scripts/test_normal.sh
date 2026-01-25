@@ -244,65 +244,7 @@ verify_no_leaks() {
         fi
     fi
 
-    # 检查View泄露（不应该检测到）
-    if [[ "$expected_no_leaks" == *"view"* ]]; then
-        if grep -qi "View泄露" "$output_file"; then
-            local count=$(grep -oP "View泄露[^:]*:\s*\K\d+" "$output_file" | head -1 || echo "0")
-            if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] 2>/dev/null; then
-                print_error "误报：检测到View泄露 (${count}个)，但这是正常使用场景"
-                ((failed++))
-            elif grep -qi "View泄露.*[0-9]" "$output_file"; then
-                print_error "误报：检测到View泄露，但这是正常使用场景"
-                ((failed++))
-            else
-                print_success "未检测到View泄露 (正常)"
-                ((passed++))
-            fi
-        else
-            print_success "未检测到View泄露 (正常)"
-            ((passed++))
-        fi
-    fi
 
-    # 检查ViewModel泄露（不应该检测到）
-    if [[ "$expected_no_leaks" == *"viewmodel"* ]]; then
-        if grep -qi "ViewModel泄露" "$output_file"; then
-            local count=$(grep -oP "ViewModel泄露[^:]*:\s*\K\d+" "$output_file" | head -1 || echo "0")
-            if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] 2>/dev/null; then
-                print_error "误报：检测到ViewModel泄露 (${count}个)，但这是正常使用场景"
-                ((failed++))
-            elif grep -qi "ViewModel泄露.*[0-9]" "$output_file"; then
-                print_error "误报：检测到ViewModel泄露，但这是正常使用场景"
-                ((failed++))
-            else
-                print_success "未检测到ViewModel泄露 (正常)"
-                ((passed++))
-            fi
-        else
-            print_success "未检测到ViewModel泄露 (正常)"
-            ((passed++))
-        fi
-    fi
-
-    # 检查Service泄露（不应该检测到）
-    if [[ "$expected_no_leaks" == *"service"* ]]; then
-        if grep -qi "Service泄露" "$output_file"; then
-            local count=$(grep -oP "Service泄露[^:]*:\s*\K\d+" "$output_file" | head -1 || echo "0")
-            if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] 2>/dev/null; then
-                print_error "误报：检测到Service泄露 (${count}个)，但这是正常使用场景"
-                ((failed++))
-            elif grep -qi "Service泄露.*[0-9]" "$output_file"; then
-                print_error "误报：检测到Service泄露，但这是正常使用场景"
-                ((failed++))
-            else
-                print_success "未检测到Service泄露 (正常)"
-                ((passed++))
-            fi
-        else
-            print_success "未检测到Service泄露 (正常)"
-            ((passed++))
-        fi
-    fi
 
     # 检查Dialog泄露（不应该检测到）
     if [[ "$expected_no_leaks" == *"dialog"* ]]; then
@@ -324,25 +266,6 @@ verify_no_leaks() {
         fi
     fi
 
-    # 检查Handler/Message泄露（不应该检测到）
-    if [[ "$expected_no_leaks" == *"handler_message"* ]]; then
-        if grep -qi "Handler/Message泄露\|Handler泄露\|Message泄露" "$output_file"; then
-            local count=$(grep -oP "Handler/Message泄露[^:]*:\s*\K\d+" "$output_file" | head -1 || echo "0")
-            if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] 2>/dev/null; then
-                print_error "误报：检测到Handler/Message泄露 (${count}个)，但这是正常使用场景"
-                ((failed++))
-            elif grep -qi "Handler/Message泄露.*[0-9]\|Handler泄露.*[0-9]\|Message泄露.*[0-9]" "$output_file"; then
-                print_error "误报：检测到Handler/Message泄露，但这是正常使用场景"
-                ((failed++))
-            else
-                print_success "未检测到Handler/Message泄露 (正常)"
-                ((passed++))
-            fi
-        else
-            print_success "未检测到Handler/Message泄露 (正常)"
-            ((passed++))
-        fi
-    fi
 
     # 检查BroadcastReceiver泄露（不应该检测到）
     if [[ "$expected_no_leaks" == *"broadcast_receiver"* ]]; then
@@ -691,66 +614,6 @@ test_normal_fragment() {
     return 0
 }
 
-# 测试用例：View正常使用
-test_normal_view() {
-    print_test "View正常使用（不应该检测到泄露）"
-
-    if ! trigger_normal "com.koom.normal.action.VIEW" "View正常使用"; then
-        print_error "触发场景失败"
-        return 1
-    fi
-
-    # 等待View正常移除
-    print_info "等待 View 正常移除 (额外 3 秒，确保Activity正常finish和View正常移除)..."
-    sleep 3
-
-    # 检查应用是否还在运行
-    print_info "检查应用是否还在运行..."
-    if ! adb shell pidof "$PACKAGE_NAME" > /dev/null 2>&1; then
-        print_info "应用已退出，重新启动应用..."
-        if ! adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"; then
-            print_error "重新启动应用失败"
-            return 1
-        fi
-        sleep 2
-    else
-        print_info "应用仍在运行，直接dumpheap"
-    fi
-
-    if ! dump_heap "test_normal_view.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_normal_view.hprof" "view"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
-
-# 测试用例：ViewModel正常使用
-test_normal_viewmodel() {
-    print_test "ViewModel正常使用（不应该检测到泄露）"
-
-    if ! trigger_normal "com.koom.normal.action.VIEWMODEL" "ViewModel正常使用"; then
-        print_error "触发场景失败"
-        return 1
-    fi
-
-    if ! dump_heap "test_normal_viewmodel.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_normal_viewmodel.hprof" "viewmodel"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
 
 # 测试用例：Service正常使用
 test_normal_service() {
@@ -804,27 +667,6 @@ test_normal_dialog() {
     return 0
 }
 
-# 测试用例：Handler/Message正常使用
-test_normal_handler_message() {
-    print_test "Handler/Message正常使用（不应该检测到泄露）"
-
-    if ! trigger_normal "com.koom.normal.action.HANDLER_MESSAGE" "Handler/Message正常使用"; then
-        print_error "触发场景失败"
-        return 1
-    fi
-
-    if ! dump_heap "test_normal_handler_message.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_normal_handler_message.hprof" "handler_message"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
 
 # 测试用例：BroadcastReceiver正常使用
 test_normal_broadcast_receiver() {
@@ -893,11 +735,7 @@ run_all_tests() {
         "test_normal_multiple_duplicate_thread"
         "test_normal_activity"
         "test_normal_fragment"
-        "test_normal_view"
-        "test_normal_viewmodel"
-        "test_normal_service"
         "test_normal_dialog"
-        "test_normal_handler_message"
         "test_normal_broadcast_receiver"
         "test_normal_animator"
     )
@@ -961,7 +799,7 @@ main() {
     check_jar
 
     if [ $# -eq 0 ]; then
-        echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_thread|multiple_threads|activity|fragment|view|viewmodel|service|dialog|handler_message|broadcast_receiver|animator|all]"
+        echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_thread|multiple_threads|activity|fragment|dialog|broadcast_receiver|animator|all]"
         exit 1
     fi
 
@@ -991,20 +829,8 @@ main() {
             fragment)
                 test_normal_fragment
                 ;;
-            view)
-                test_normal_view
-                ;;
-            viewmodel)
-                test_normal_viewmodel
-                ;;
-            service)
-                test_normal_service
-                ;;
             dialog)
                 test_normal_dialog
-                ;;
-            handler_message)
-                test_normal_handler_message
                 ;;
             broadcast_receiver)
                 test_normal_broadcast_receiver
@@ -1016,7 +842,7 @@ main() {
                 run_all_tests
                 ;;
             *)
-                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_thread|multiple_threads|activity|fragment|view|viewmodel|service|dialog|handler_message|broadcast_receiver|animator|all]"
+                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_thread|multiple_threads|activity|fragment|dialog|broadcast_receiver|animator|all]"
                 exit 1
                 ;;
         esac

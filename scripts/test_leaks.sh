@@ -335,53 +335,6 @@ verify_leaks() {
         fi
     fi
 
-    # 检查View泄露
-    if [[ "$expected_leaks" == *"view"* ]]; then
-        # 匹配格式: "   View泄露: 3 个" (注意可能有空格，且View可能被其他词包含)
-        if grep -qiE "View泄露|View.*泄露" "$output_file"; then
-            local count=$(grep -oP "View泄露[^:]*:\s*\K\d+" "$output_file" | head -1)
-            count=${count:-0}  # 如果为空则设为0
-            # 确保 count 是数字
-            if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] 2>/dev/null; then
-                print_success "检测到View泄露 (${count}个)"
-                ((passed++))
-            elif grep -qiE "View泄露.*[0-9]" "$output_file"; then
-                # 如果匹配到但数字提取失败，至少确认有泄露
-                print_success "检测到View泄露"
-                ((passed++))
-            else
-                print_error "未检测到View泄露 (count=${count})"
-                ((failed++))
-            fi
-        else
-            print_error "未检测到View泄露 (报告中未找到关键词)"
-            ((failed++))
-        fi
-    fi
-
-    # 检查ViewModel泄露
-    if [[ "$expected_leaks" == *"viewmodel"* ]]; then
-        # 匹配格式: "   ViewModel泄露: 2 个" (注意可能有空格)
-        if grep -qi "ViewModel泄露" "$output_file"; then
-            local count=$(grep -oP "ViewModel泄露[^:]*:\s*\K\d+" "$output_file" | head -1)
-            count=${count:-0}  # 如果为空则设为0
-            # 确保 count 是数字
-            if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] 2>/dev/null; then
-                print_success "检测到ViewModel泄露 (${count}个)"
-                ((passed++))
-            elif grep -qi "ViewModel泄露.*[0-9]" "$output_file"; then
-                # 如果匹配到但数字提取失败，至少确认有泄露
-                print_success "检测到ViewModel泄露"
-                ((passed++))
-            else
-                print_error "未检测到ViewModel泄露 (count=${count})"
-                ((failed++))
-            fi
-        else
-            print_error "未检测到ViewModel泄露 (报告中未找到关键词)"
-            ((failed++))
-        fi
-    fi
 
     # 检查Service泄露
     if [[ "$expected_leaks" == *"service"* ]]; then
@@ -787,98 +740,7 @@ test_fragment_leak() {
     return 0
 }
 
-# 测试用例：View泄露
-test_view_leak() {
-    print_test "View泄露检测"
 
-    # 先强制停止app
-    print_info "停止应用..."
-    if ! adb shell am force-stop "$PACKAGE_NAME"; then
-        print_error "停止应用失败"
-        return 1
-    fi
-    sleep 1
-
-    # 启动app并触发View泄露
-    print_info "启动app并触发View泄露..."
-    if ! adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME" -a "com.koom.leak.action.VIEW_LEAK"; then
-        print_error "启动应用失败"
-        return 1
-    fi
-    print_success "泄露触发完成"
-
-    # 等待泄露创建完成
-    print_info "等待泄露创建完成 (3秒)..."
-    sleep 3
-
-    # 等待Activity被销毁（参考Fragment泄露的做法）
-    print_info "等待 Activity 被销毁 (额外 10 秒，确保Activity完全销毁和View分离)..."
-    sleep 10
-
-    # 重新启动app（确保应用在运行）
-    print_info "重新启动应用（确保应用在运行）..."
-    if ! adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"; then
-        print_error "重新启动应用失败"
-        return 1
-    fi
-    sleep 2
-
-    if ! dump_heap "test_view_leak.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_view_leak.hprof" "view"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
-
-# 测试用例：ViewModel泄露
-test_viewmodel_leak() {
-    print_test "ViewModel泄露检测"
-
-    if ! trigger_leak "com.koom.leak.action.VIEWMODEL_LEAK" "ViewModel泄露"; then
-        print_error "触发泄露失败"
-        return 1
-    fi
-
-    if ! dump_heap "test_viewmodel_leak.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_viewmodel_leak.hprof" "viewmodel"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
-
-# 测试用例：Service泄露
-test_service_leak() {
-    print_test "Service泄露检测"
-
-    if ! trigger_leak "com.koom.leak.action.SERVICE_LEAK" "Service泄露"; then
-        print_error "触发泄露失败"
-        return 1
-    fi
-
-    if ! dump_heap "test_service_leak.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_service_leak.hprof" "service"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
 
 # 测试用例：Dialog泄露
 test_dialog_leak() {
@@ -906,63 +768,6 @@ test_dialog_leak() {
     return 0
 }
 
-# 测试用例：Handler/Message泄露
-test_handler_message_leak() {
-    print_test "Handler/Message泄露检测"
-
-    # 先强制停止app
-    print_info "停止应用..."
-    if ! adb shell am force-stop "$PACKAGE_NAME"; then
-        print_error "停止应用失败"
-        return 1
-    fi
-    sleep 1
-
-    # 启动app并触发Handler/Message泄露
-    print_info "启动app并触发Handler/Message泄露..."
-    if ! adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME" -a "com.koom.leak.action.HANDLER_MESSAGE_LEAK"; then
-        print_error "启动应用失败"
-        return 1
-    fi
-    print_success "泄露触发完成"
-
-    # 等待泄露创建完成
-    print_info "等待泄露创建完成 (3秒)..."
-    sleep 3
-
-    # 等待Activity被销毁（参考Fragment泄露的做法）
-    # Handler/Message泄露：Activity会在1秒后finish，Message会在60秒后执行
-    # 所以等待2秒确保Activity已finish，但Message仍在队列中
-    print_info "等待 Activity 被销毁 (额外 2 秒，确保Activity已finish但Message仍在队列中)..."
-    sleep 2
-
-    # 注意：不要重新启动app，因为重新启动会清空消息队列
-    # 直接dumpheap，确保Message仍在队列中
-    # 但需要确保应用还在运行
-    print_info "检查应用是否还在运行..."
-    if ! adb shell pidof "$PACKAGE_NAME" > /dev/null 2>&1; then
-        print_info "应用已退出，重新启动应用..."
-        if ! adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"; then
-            print_error "重新启动应用失败"
-            return 1
-        fi
-        sleep 2
-    else
-        print_info "应用仍在运行，直接dumpheap"
-    fi
-
-    if ! dump_heap "test_handler_message_leak.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_handler_message_leak.hprof" "handler_message"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
 
 # 测试用例：BroadcastReceiver泄露
 test_broadcast_receiver_leak() {
@@ -1063,11 +868,7 @@ run_all_tests() {
         "test_multiple_duplicate_thread_leak"
         "test_activity_leak"
         "test_fragment_leak"
-        "test_view_leak"
-        "test_viewmodel_leak"
-        "test_service_leak"
         "test_dialog_leak"
-        "test_handler_message_leak"
         "test_broadcast_receiver_leak"
         "test_animator_leak"
     )
@@ -1162,20 +963,8 @@ main() {
             fragment)
                 test_fragment_leak
                 ;;
-            view)
-                test_view_leak
-                ;;
-            viewmodel)
-                test_viewmodel_leak
-                ;;
-            service)
-                test_service_leak
-                ;;
             dialog)
                 test_dialog_leak
-                ;;
-            handler_message)
-                test_handler_message_leak
                 ;;
             broadcast_receiver)
                 test_broadcast_receiver_leak
@@ -1187,7 +976,7 @@ main() {
                 run_all_tests
                 ;;
             *)
-                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_threads|multiple_threads|activity|fragment|view|viewmodel|service|dialog|handler_message|broadcast_receiver|animator|all]"
+                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_threads|multiple_threads|activity|fragment|dialog|broadcast_receiver|animator|all]"
                 exit 1
                 ;;
         esac

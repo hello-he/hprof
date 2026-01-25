@@ -138,106 +138,7 @@ class HprofAnalyzerLeakDetectionTest {
         println("✅ Fragment 泄露检测通过: 检测到 ${result.stats.leakedFragmentCount} 个泄露")
     }
 
-    // ==================== View 泄露检测测试 ====================
 
-    @Test
-    fun testViewLeakDetection() {
-        val hprofFile = getHprofFile("view_leak.hprof")
-        if (hprofFile == null) {
-            println("⚠️  跳过测试: view_leak.hprof 不存在")
-            println("   生成方法: 运行 demo APK，点击'View泄露'按钮，退出app，然后dump hprof")
-            return
-        }
-
-        val result = analyzeAndVerify(hprofFile)
-
-        // 验证 View 泄露被检测到
-        assertTrue(
-            "应该检测到 View 泄露",
-            result.stats.leakedViewCount > 0
-        )
-
-        // 验证泄露对象列表包含 View
-        val viewLeaks = result.leakingObjects.filter { 
-            it.className.contains("View") && !it.className.contains("ViewGroup")
-        }
-        assertTrue(
-            "泄露对象列表应该包含 View",
-            viewLeaks.isNotEmpty()
-        )
-
-        // 验证泄露原因
-        viewLeaks.forEach { leak ->
-            assertTrue(
-                "泄露原因应该包含 'View'",
-                leak.leakReason.contains("View", ignoreCase = true)
-            )
-        }
-
-        println("✅ View 泄露检测通过: 检测到 ${result.stats.leakedViewCount} 个泄露")
-    }
-
-    // ==================== ViewModel 泄露检测测试 ====================
-
-    @Test
-    fun testViewModelLeakDetection() {
-        val hprofFile = getHprofFile("viewmodel_leak.hprof")
-        if (hprofFile == null) {
-            println("⚠️  跳过测试: viewmodel_leak.hprof 不存在")
-            println("   生成方法: 运行 demo APK，点击'ViewModel泄露'按钮，然后dump hprof")
-            return
-        }
-
-        val result = analyzeAndVerify(hprofFile)
-
-        // 验证 ViewModel 泄露被检测到
-        assertTrue(
-            "应该检测到 ViewModel 泄露",
-            result.stats.leakedViewModelCount > 0
-        )
-
-        // 验证泄露对象列表包含 ViewModel
-        val viewModelLeaks = result.leakingObjects.filter { 
-            it.className.contains("ViewModel") 
-        }
-        assertTrue(
-            "泄露对象列表应该包含 ViewModel",
-            viewModelLeaks.isNotEmpty()
-        )
-
-        println("✅ ViewModel 泄露检测通过: 检测到 ${result.stats.leakedViewModelCount} 个泄露")
-    }
-
-    // ==================== Service 泄露检测测试 ====================
-
-    @Test
-    fun testServiceLeakDetection() {
-        val hprofFile = getHprofFile("service_leak.hprof")
-        if (hprofFile == null) {
-            println("⚠️  跳过测试: service_leak.hprof 不存在")
-            println("   生成方法: 运行 demo APK，点击'Service泄露'按钮，然后dump hprof")
-            return
-        }
-
-        val result = analyzeAndVerify(hprofFile)
-
-        // 验证 Service 泄露被检测到
-        assertTrue(
-            "应该检测到 Service 泄露",
-            result.stats.leakedServiceCount > 0
-        )
-
-        // 验证泄露对象列表包含 Service
-        val serviceLeaks = result.leakingObjects.filter { 
-            it.className.contains("Service") 
-        }
-        assertTrue(
-            "泄露对象列表应该包含 Service",
-            serviceLeaks.isNotEmpty()
-        )
-
-        println("✅ Service 泄露检测通过: 检测到 ${result.stats.leakedServiceCount} 个泄露")
-    }
 
     // ==================== Dialog 泄露检测测试 ====================
 
@@ -270,36 +171,6 @@ class HprofAnalyzerLeakDetectionTest {
         println("✅ Dialog 泄露检测通过: 检测到 ${result.stats.leakedDialogCount} 个泄露")
     }
 
-    // ==================== Handler/Message 泄露检测测试 ====================
-
-    @Test
-    fun testHandlerMessageLeakDetection() {
-        val hprofFile = getHprofFile("handler_message_leak.hprof")
-        if (hprofFile == null) {
-            println("⚠️  跳过测试: handler_message_leak.hprof 不存在")
-            println("   生成方法: 运行 demo APK，点击'Handler/Message泄露'按钮，然后dump hprof")
-            return
-        }
-
-        val result = analyzeAndVerify(hprofFile)
-
-        // 验证 Handler/Message 泄露被检测到
-        assertTrue(
-            "应该检测到 Handler/Message 泄露",
-            result.stats.leakedHandlerMessageCount > 0
-        )
-
-        // 验证泄露对象列表包含 Message
-        val messageLeaks = result.leakingObjects.filter { 
-            it.className.contains("Message") 
-        }
-        assertTrue(
-            "泄露对象列表应该包含 Message",
-            messageLeaks.isNotEmpty()
-        )
-
-        println("✅ Handler/Message 泄露检测通过: 检测到 ${result.stats.leakedHandlerMessageCount} 个泄露")
-    }
 
     // ==================== BroadcastReceiver 泄露检测测试 ====================
 
@@ -573,11 +444,7 @@ class HprofAnalyzerLeakDetectionTest {
         val leakTypeCounts = mapOf(
             "Activity" to result.stats.leakedActivityCount,
             "Fragment" to result.stats.leakedFragmentCount,
-            "View" to result.stats.leakedViewCount,
-            "ViewModel" to result.stats.leakedViewModelCount,
-            "Service" to result.stats.leakedServiceCount,
             "Dialog" to result.stats.leakedDialogCount,
-            "Handler/Message" to result.stats.leakedHandlerMessageCount,
             "BroadcastReceiver" to result.stats.leakedBroadcastReceiverCount,
             "Animator" to result.stats.leakedAnimatorCount,
             "Bitmap" to result.stats.leakedBitmapCount,

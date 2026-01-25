@@ -35,12 +35,6 @@ class AnalyzeCommand : Runnable {
     private var outputDir: String = "./reports"
 
     @CommandLine.Option(
-        names = ["--extract-bitmaps"],
-        description = ["提取Bitmap并检测重复"]
-    )
-    private var extractBitmaps: Boolean = false
-
-    @CommandLine.Option(
         names = ["--large-only"],
         description = ["只提取大Bitmap(>1M像素)"]
     )
@@ -60,6 +54,16 @@ class AnalyzeCommand : Runnable {
         println("🔍 正在分析hprof文件，请稍候...")
         println()
 
+        // 自动检测hprof文件是否包含Bitmap dumpData（来自 am dumpheap -b）
+        println("🔍 检测hprof文件是否包含Bitmap数据（dumpheap -b）...")
+        val shouldExtractBitmaps = BitmapExtractor().hasBitmapDumpData(actualHprofPath.toFile())
+        if (shouldExtractBitmaps) {
+            println("✅ 检测到Bitmap dumpData，自动启用Bitmap提取和分析")
+        } else {
+            println("ℹ️  未检测到Bitmap dumpData（如需提取Bitmap，请使用 am dumpheap -b png 获取hprof）")
+        }
+        println()
+
         // 使用hprof文件名（不含扩展名）+ 时间戳作为输出子目录
         val hprofBaseName = actualHprofPath.fileName.toString().removeSuffix(".hprof")
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
@@ -72,7 +76,7 @@ class AnalyzeCommand : Runnable {
 
         try {
             // 先创建bitmap目录（如果需要提取）
-            val bitmapDir = if (extractBitmaps) {
+            val bitmapDir = if (shouldExtractBitmaps) {
                 actualOutputDir.resolve("bitmaps")
             } else {
                 null
@@ -84,8 +88,8 @@ class AnalyzeCommand : Runnable {
             // 打印到控制台
             result.printReport()
 
-            // 提取Bitmap（在保存报告之前）
-            if (extractBitmaps && bitmapDir != null) {
+            // 提取Bitmap
+            if (shouldExtractBitmaps && bitmapDir != null) {
                 println("\n🖼️  正在提取Bitmap...")
                 val extractor = BitmapExtractor()
                 val bitmapResult = extractor.extract(
@@ -108,7 +112,7 @@ class AnalyzeCommand : Runnable {
             val savedFiles = result.saveReport(actualOutputDir).toMutableList()
 
             // 添加bitmap报告文件到列表
-            if (extractBitmaps && bitmapDir != null) {
+            if (shouldExtractBitmaps && bitmapDir != null) {
                 val bitmapTxtFile = actualOutputDir.resolve("bitmap_analysis.txt")
                 val bitmapHtmlFile = actualOutputDir.resolve("bitmap_analysis.html")
                 if (Files.exists(bitmapTxtFile)) savedFiles.add(bitmapTxtFile)

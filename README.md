@@ -77,11 +77,11 @@ cd /path/to/mem-monitor
 # 基本分析
 java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof
 
-# 提取Bitmap并生成完整报告
-java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof --extract-bitmaps
+# 自动检测并提取Bitmap（如果hprof包含dumpheap -b的bitmap数据）
+java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof
 
 # 只提取大Bitmap(>1M像素)
-java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof --extract-bitmaps --large-only
+java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof --large-only
 
 # 指定输出目录
 java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof -o ./reports
@@ -120,9 +120,8 @@ java -jar build/libs/mem-monitor-1.0.0-all.jar scan -p com.example.app \
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `-f, --file <file>` | hprof文件路径 | 必填 |
+| `-f, --hprof <file>` | hprof文件路径 | 必填 |
 | `-o, --output <dir>` | 输出目录 | ./reports |
-| `--extract-bitmaps` | 提取Bitmap图片 | false |
 | `--large-only` | 只提取大Bitmap(>1M像素) | false |
 
 ### watch 命令
@@ -339,7 +338,7 @@ Android 14 (API 34) 引入了新的dumpheap选项：
 adb shell am dumpheap -b png <package> /sdcard/heap.hprof
 ```
 
-此选项会将Bitmap的压缩图片数据（PNG/JPEG/WEBP）包含在hprof文件的`Bitmap.dumpData`静态字段中，工具会自动读取并解码这些数据。
+此选项会将Bitmap的压缩图片数据（PNG/JPEG/WEBP）包含在hprof文件的`Bitmap.dumpData`静态字段中，工具会自动检测并读取这些数据，无需手动指定参数。
 
 对于不支持该选项的系统，工具会：
 1. 尝试读取Java堆中的Bitmap mBuffer字段

@@ -56,10 +56,10 @@ adb shell monkey -p com.example.app 5000
 ## 分析Hprof文件
 
 ```bash
-java -jar build/libs/mem-monitor-1.0.0-all.jar analyze \
-  -f heap.hprof \
-  --extract-bitmaps
+java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof
 ```
+
+工具会自动检测hprof文件是否包含Bitmap数据（来自 `am dumpheap -b`），如果包含则自动提取并生成报告。
 
 输出：`reports/heap.hprof/bitmap_analysis.html` - 在浏览器中打开查看
 
@@ -70,7 +70,7 @@ java -jar build/libs/mem-monitor-1.0.0-all.jar analyze \
 java -jar build/libs/mem-monitor-1.0.0-all.jar scan -p com.example.app
 
 # 只提取大Bitmap
-java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof --extract-bitmaps --large-only
+java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof --large-only
 
 # 使用测试APK验证监控功能
 cd demo && ./gradlew assembleDebug

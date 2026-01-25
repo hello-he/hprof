@@ -88,6 +88,42 @@ class BitmapExtractor {
     )
 
     /**
+     * 检测hprof文件是否包含Bitmap dumpData（来自 am dumpheap -b）
+     * 这是一个轻量级的检测方法，只检查是否存在dumpData，不进行完整提取
+     */
+    fun hasBitmapDumpData(hprofFile: File): Boolean {
+        return try {
+            hprofFile.openHeapGraph(
+                proguardMapping = null,
+                indexedGcRootTypes = setOf(
+                    HprofRecordTag.ROOT_JNI_GLOBAL,
+                    HprofRecordTag.ROOT_JNI_LOCAL
+                )
+            ).use { graph ->
+                val bitmapClass = graph.findClassByName(BITMAP_CLASS_NAME) ?: return false
+                
+                // 查找 Bitmap.dumpData 静态字段
+                val dumpDataField = bitmapClass["dumpData"] ?: return false
+                val dumpDataObj = dumpDataField.value?.asObject ?: return false
+                val dumpDataInstance = dumpDataObj.asInstance ?: return false
+                
+                // 获取 DumpData 实例的类名
+                val dumpDataClassName = dumpDataInstance.instanceClass.name
+                
+                // 读取 count
+                val countField = dumpDataInstance[dumpDataClassName, "count"]
+                val count = countField?.value?.asInt ?: 0
+                
+                // 如果 count > 0，说明有 bitmap dumpData
+                count > 0
+            }
+        } catch (e: Exception) {
+            logger.debug("检测Bitmap dumpData失败: ${e.message}")
+            false
+        }
+    }
+
+    /**
      * 从hprof文件提取Bitmap
      *
      * 注意: 这里提取的是所有大Bitmap，不限于泄露的Bitmap

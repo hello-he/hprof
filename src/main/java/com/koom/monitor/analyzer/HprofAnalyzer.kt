@@ -1684,11 +1684,26 @@ class HprofAnalyzer {
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 sb.appendLine("   总线程数: ${stats.threadCount}")
 
+                // 显示所有线程名列表
+                val allThreads = stats.threadNameCount.entries.sortedByDescending { it.value }
+                if (allThreads.isNotEmpty()) {
+                    sb.appendLine("   所有线程列表:")
+                    allThreads.forEach { (name, count) ->
+                        // 数量为1时不显示数量，大于1时才显示
+                        if (count > 1) {
+                            sb.appendLine("      - $name ($count)")
+                        } else {
+                            sb.appendLine("      - $name")
+                        }
+                    }
+                    sb.appendLine()
+                }
+
                 // 显示同名线程数量较多的
                 val frequentThreads = stats.threadNameCount.filter { it.value >= 3 }
                     .entries.sortedByDescending { it.value }
                 if (frequentThreads.isNotEmpty()) {
-                    sb.appendLine("   同名线程(≥3个):")
+                    sb.appendLine("   ⚠️ 同名线程警告 (≥3个，可能存在线程泄露):")
                     frequentThreads.forEach { (name, count) ->
                         sb.appendLine("      - $name: $count 个")
                     }
@@ -1696,8 +1711,8 @@ class HprofAnalyzer {
                     if (frequentThreads.size >= 2) {
                         sb.appendLine("   多组重复线程: ${frequentThreads.size}种 x ${frequentThreads.map { it.value }.average().toInt()} (平均)")
                     }
+                    sb.appendLine()
                 }
-                sb.appendLine()
             }
 
             if (stats.detectedPackages.isNotEmpty()) {

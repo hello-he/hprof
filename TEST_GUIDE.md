@@ -10,11 +10,7 @@
 ~/tmp/hprof/
 ├── activity_leak.hprof          # Activity 泄露测试
 ├── fragment_leak.hprof          # Fragment 泄露测试
-├── view_leak.hprof              # View 泄露测试
-├── viewmodel_leak.hprof         # ViewModel 泄露测试
-├── service_leak.hprof           # Service 泄露测试
 ├── dialog_leak.hprof            # Dialog 泄露测试
-├── handler_message_leak.hprof   # Handler/Message 泄露测试
 ├── broadcast_receiver_leak.hprof # BroadcastReceiver 泄露测试
 ├── animator_leak.hprof          # Animator 泄露测试
 ├── bitmap_leak.hprof            # Bitmap 泄露测试
@@ -52,8 +48,8 @@ adb shell am start -n com.koom.leak/.MainActivity
 # 3. 重新打开 app（创建新的 MainActivity）
 adb shell am start -n com.koom.leak/.MainActivity
 
-# 4. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/activity_leak.hprof
+# 4. Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
+adb shell am dumpheap -g -b png com.koom.leak /sdcard/activity_leak.hprof
 
 # 5. 拉取文件
 adb pull /sdcard/activity_leak.hprof ~/tmp/hprof/
@@ -71,72 +67,15 @@ adb shell input tap <x> <y>  # 需要找到按钮坐标，或使用 UI Automator
 
 # 3. 等待 Fragment 被移除（约 500ms）
 
-# 4. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/fragment_leak.hprof
+# 4. Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
+adb shell am dumpheap -g -b png com.koom.leak /sdcard/fragment_leak.hprof
 
 # 5. 拉取文件
 adb pull /sdcard/fragment_leak.hprof ~/tmp/hprof/
 adb shell rm /sdcard/fragment_leak.hprof
 ```
 
-#### 2.3 View 泄露
-
-```bash
-# 1. 启动 demo APK
-adb shell am start -n com.koom.leak/.MainActivity
-
-# 2. 触发 View 泄露（点击"View泄露"按钮）
-adb shell input tap <x> <y>
-
-# 3. 退出 app（让 Activity 被销毁）
-adb shell am force-stop com.koom.leak
-
-# 4. 重新打开 app
-adb shell am start -n com.koom.leak/.MainActivity
-
-# 5. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/view_leak.hprof
-
-# 6. 拉取文件
-adb pull /sdcard/view_leak.hprof ~/tmp/hprof/
-adb shell rm /sdcard/view_leak.hprof
-```
-
-#### 2.4 ViewModel 泄露
-
-```bash
-# 1. 启动 demo APK
-adb shell am start -n com.koom.leak/.MainActivity
-
-# 2. 触发 ViewModel 泄露（点击"ViewModel泄露"按钮）
-adb shell input tap <x> <y>
-
-# 3. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/viewmodel_leak.hprof
-
-# 4. 拉取文件
-adb pull /sdcard/viewmodel_leak.hprof ~/tmp/hprof/
-adb shell rm /sdcard/viewmodel_leak.hprof
-```
-
-#### 2.5 Service 泄露
-
-```bash
-# 1. 启动 demo APK
-adb shell am start -n com.koom.leak/.MainActivity
-
-# 2. 触发 Service 泄露（点击"Service泄露"按钮）
-adb shell input tap <x> <y>
-
-# 3. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/service_leak.hprof
-
-# 4. 拉取文件
-adb pull /sdcard/service_leak.hprof ~/tmp/hprof/
-adb shell rm /sdcard/service_leak.hprof
-```
-
-#### 2.6 Dialog 泄露
+#### 2.3 Dialog 泄露
 
 ```bash
 # 1. 启动 demo APK
@@ -147,34 +86,15 @@ adb shell input tap <x> <y>
 
 # 3. 等待 Dialog 被关闭
 
-# 4. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/dialog_leak.hprof
+# 4. Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
+adb shell am dumpheap -g -b png com.koom.leak /sdcard/dialog_leak.hprof
 
 # 5. 拉取文件
 adb pull /sdcard/dialog_leak.hprof ~/tmp/hprof/
 adb shell rm /sdcard/dialog_leak.hprof
 ```
 
-#### 2.7 Handler/Message 泄露
-
-```bash
-# 1. 启动 demo APK
-adb shell am start -n com.koom.leak/.MainActivity
-
-# 2. 触发 Handler/Message 泄露（点击"Handler/Message泄露"按钮）
-adb shell input tap <x> <y>
-
-# 3. 等待 Message 被发送到队列
-
-# 4. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/handler_message_leak.hprof
-
-# 5. 拉取文件
-adb pull /sdcard/handler_message_leak.hprof ~/tmp/hprof/
-adb shell rm /sdcard/handler_message_leak.hprof
-```
-
-#### 2.8 BroadcastReceiver 泄露
+#### 2.4 BroadcastReceiver 泄露
 
 ```bash
 # 1. 启动 demo APK
@@ -183,15 +103,15 @@ adb shell am start -n com.koom.leak/.MainActivity
 # 2. 触发 BroadcastReceiver 泄露（点击"BroadcastReceiver泄露"按钮）
 adb shell input tap <x> <y>
 
-# 3. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/broadcast_receiver_leak.hprof
+# 3. Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
+adb shell am dumpheap -g -b png com.koom.leak /sdcard/broadcast_receiver_leak.hprof
 
 # 4. 拉取文件
 adb pull /sdcard/broadcast_receiver_leak.hprof ~/tmp/hprof/
 adb shell rm /sdcard/broadcast_receiver_leak.hprof
 ```
 
-#### 2.9 Animator 泄露
+#### 2.5 Animator 泄露
 
 ```bash
 # 1. 启动 demo APK
@@ -202,15 +122,15 @@ adb shell input tap <x> <y>
 
 # 3. 等待 Animator 开始运行
 
-# 4. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/animator_leak.hprof
+# 4. Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
+adb shell am dumpheap -g -b png com.koom.leak /sdcard/animator_leak.hprof
 
 # 5. 拉取文件
 adb pull /sdcard/animator_leak.hprof ~/tmp/hprof/
 adb shell rm /sdcard/animator_leak.hprof
 ```
 
-#### 2.10 Bitmap 泄露
+#### 2.6 Bitmap 泄露
 
 ```bash
 # 1. 启动 demo APK
@@ -219,15 +139,15 @@ adb shell am start -n com.koom.leak/.MainActivity
 # 2. 触发 Bitmap 泄露（点击"Bitmap泄露"按钮）
 adb shell input tap <x> <y>
 
-# 3. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/bitmap_leak.hprof
+# 3. Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
+adb shell am dumpheap -g -b png com.koom.leak /sdcard/bitmap_leak.hprof
 
 # 4. 拉取文件
 adb pull /sdcard/bitmap_leak.hprof ~/tmp/hprof/
 adb shell rm /sdcard/bitmap_leak.hprof
 ```
 
-#### 2.11 ByteArray 泄露
+#### 2.7 ByteArray 泄露
 
 ```bash
 # 1. 启动 demo APK
@@ -236,15 +156,15 @@ adb shell am start -n com.koom.leak/.MainActivity
 # 2. 触发 ByteArray 泄露（点击"ByteArray泄露"按钮）
 adb shell input tap <x> <y>
 
-# 3. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/bytearray_leak.hprof
+# 3. Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
+adb shell am dumpheap -g -b png com.koom.leak /sdcard/bytearray_leak.hprof
 
 # 4. 拉取文件
 adb pull /sdcard/bytearray_leak.hprof ~/tmp/hprof/
 adb shell rm /sdcard/bytearray_leak.hprof
 ```
 
-#### 2.12 综合测试（所有泄露类型）
+#### 2.8 综合测试（所有泄露类型）
 
 ```bash
 # 1. 启动 demo APK
@@ -253,8 +173,8 @@ adb shell am start -n com.koom.leak/.MainActivity
 # 2. 依次触发所有泄露类型
 # 注意：需要手动点击所有泄露按钮，或使用 UI Automator 脚本
 
-# 3. Dump hprof
-adb shell am dumpheap com.koom.leak /sdcard/all_leaks.hprof
+# 3. Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
+adb shell am dumpheap -g -b png com.koom.leak /sdcard/all_leaks.hprof
 
 # 4. 拉取文件
 adb pull /sdcard/all_leaks.hprof ~/tmp/hprof/
@@ -304,11 +224,11 @@ Thread.sleep(1000)
 ## 注意事项
 
 1. **Activity 泄露测试**：需要退出 app 后重新打开，确保旧的 Activity 被销毁但仍被引用
-2. **View 泄露测试**：需要退出 app 后重新打开，确保 View 的 mContext 引用已销毁的 Activity
-3. **Fragment 泄露测试**：需要等待 Fragment 被移除（约 500ms）
-4. **Dialog 泄露测试**：需要等待 Dialog 被关闭
-5. **Handler/Message 泄露测试**：需要等待 Message 被发送到队列
-6. **Animator 泄露测试**：需要等待 Animator 开始运行
+2. **Fragment 泄露测试**：需要等待 Fragment 被移除（约 500ms）
+3. **Dialog 泄露测试**：需要等待 Dialog 被关闭
+4. **BroadcastReceiver 泄露测试**：需要确保 BroadcastReceiver 已注册但未注销
+5. **Animator 泄露测试**：需要等待 Animator 开始运行
+6. **Bitmap 泄露测试**：确保使用 `-g -b png` 参数 dump hprof 以包含 Bitmap 数据
 
 ## 验证测试结果
 

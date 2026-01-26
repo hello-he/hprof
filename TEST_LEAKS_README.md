@@ -87,7 +87,7 @@ cd mem-monitor
 2. **检查/构建 JAR** - 如果 JAR 不存在，自动构建
 3. **触发泄露** - 通过 Intent 自动触发对应的泄露类型
 4. **等待泄露创建** - 等待泄露对象创建完成
-5. **Dump Heap** - 自动执行 `adb shell am dumpheap`
+5. **Dump Heap** - 自动执行 `adb shell am dumpheap -g -b png`（-g 触发 GC，-b png 包含 Bitmap 数据）
 6. **拉取文件** - 自动从设备拉取 hprof 文件
 7. **分析文件** - 自动运行 mem-monitor 分析
 8. **验证结果** - 自动验证检测结果是否符合预期

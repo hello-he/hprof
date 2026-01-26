@@ -59,7 +59,11 @@ adb shell monkey -p com.example.app 5000
 java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof
 ```
 
-工具会自动检测hprof文件是否包含Bitmap数据（来自 `am dumpheap -b`），如果包含则自动提取并生成报告。
+工具会自动检测hprof文件是否包含Bitmap数据（来自 `am dumpheap -g -b png`），如果包含则自动提取并生成报告。
+
+**参数说明**：
+- `-g`: 在 dump 前触发 GC，获得更准确的内存快照
+- `-b png`: 包含 Bitmap 数据（Android 14+）
 
 输出：`reports/heap.hprof/bitmap_analysis.html` - 在浏览器中打开查看
 

@@ -236,14 +236,14 @@ class AdbClient(
     /**
      * 执行dump heap
      * @param includeBitmaps 是否包含Bitmap数据 (Android 14+, 使用 -b png)
-     * @param gzip 是否使用gzip压缩 (使用 -g)
+     * @param triggerGc 是否在dump前触发GC (使用 -g)
      */
-    fun dumpHeap(packageName: String, outputPath: String, includeBitmaps: Boolean = true, gzip: Boolean = true): ProcessResult {
+    fun dumpHeap(packageName: String, outputPath: String, includeBitmaps: Boolean = true, triggerGc: Boolean = true): ProcessResult {
         // 确保输出目录存在
         shell("mkdir -p ${outputPath.substringBeforeLast('/')}")
 
         val options = mutableListOf<String>()
-        if (gzip) {
+        if (triggerGc) {
             options.add("-g")
         }
         if (includeBitmaps) {

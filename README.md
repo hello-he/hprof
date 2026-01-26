@@ -8,7 +8,7 @@ Android内存监控工具，通过ADB shell监控Android应用的内存、线程
 
 ### 1. 离线Hprof分析 (`analyze`)
 - 分析hprof文件，检测内存泄漏
-- 自动提取Bitmap图片（支持Android 14+ `am dumpheap -b png`）
+- 自动提取Bitmap图片（支持Android 14+ `am dumpheap -g -b png`）
 - 生成HTML/文本分析报告
 - 检测重复Bitmap，计算内存浪费
 
@@ -330,15 +330,19 @@ adb shell monkey -p com.koom.leak \
 
 测试使用 `/home/dk/tmp/hprof/test.hprof` 作为样例数据。
 
-## Android 14+ Bitmap提取说明
+## dumpheap 参数说明
 
-Android 14 (API 34) 引入了新的dumpheap选项：
+工具在 watch 模式下会自动使用以下参数执行 dumpheap：
 
 ```bash
-adb shell am dumpheap -b png <package> /sdcard/heap.hprof
+adb shell am dumpheap -g -b png <package> /sdcard/heap.hprof
 ```
 
-此选项会将Bitmap的压缩图片数据（PNG/JPEG/WEBP）包含在hprof文件的`Bitmap.dumpData`静态字段中，工具会自动检测并读取这些数据，无需手动指定参数。
+参数说明：
+- **`-g`**: 在 dump 前触发一次垃圾回收（GC），清理可回收对象，获得更准确的内存快照
+- **`-b png`**: 包含 Bitmap 数据（Android 14+），将 Bitmap 的压缩图片数据（PNG/JPEG/WEBP）包含在 hprof 文件的 `Bitmap.dumpData` 静态字段中
+
+工具会自动检测并读取这些数据，无需手动指定参数。
 
 对于不支持该选项的系统，工具会：
 1. 尝试读取Java堆中的Bitmap mBuffer字段
@@ -372,7 +376,7 @@ adb shell pm list packages | grep <package_name>
 ```
 可能原因：
 1. Bitmap数据在native内存中，工具会创建占位图
-2. 确保使用 `am dumpheap -b png` 获取hprof（Android 14+）
+2. 确保使用 `am dumpheap -g -b png` 获取hprof（Android 14+）
 ```
 
 ## 版本历史

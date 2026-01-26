@@ -106,12 +106,16 @@ class HprofAnalyzer {
             // fragmentClass用于isFragment检查，优先使用AndroidX，如果没有则使用Native
             val fragmentClass = androidxFragmentClass ?: nativeFragmentClass ?: supportFragmentClass
             val bitmapClass = graph.findClassByName(BITMAP_CLASS_NAME)
+            val serviceClass = graph.findClassByName(SERVICE_CLASS_NAME)
             val dialogClass = graph.findClassByName(DIALOG_CLASS_NAME)
             val broadcastReceiverClass = graph.findClassByName(BROADCAST_RECEIVER_CLASS_NAME)
             val objectAnimatorClass = graph.findClassByName(OBJECT_ANIMATOR_CLASS_NAME)
             val valueAnimatorClass = graph.findClassByName(VALUE_ANIMATOR_CLASS_NAME)
             val nativeAllocationRegistryClass = graph.findClassByName(NATIVE_ALLOCATION_REGISTRY_CLASS_NAME)
             val nativeAllocationCleanerThunkClass = graph.findClassByName(NATIVE_ALLOCATION_CLEANER_THUNK_CLASS_NAME)
+            
+            // 获取ActivityThread持有的Service对象ID集合（用于Service泄露检测）
+            val aliveServiceObjectIds = getAliveServiceObjectIds(graph)
 
             // 统计信息
             stats.totalClassCount = graph.classCount
@@ -141,6 +145,7 @@ class HprofAnalyzer {
                         if (isActivity(activityClass, instance) ||
                             isFragment(fragmentClass, instance) ||
                             isBitmap(bitmapClass, instance) ||
+                            isService(serviceClass, instance) ||
                             isDialog(dialogClass, instance) ||
                             isBroadcastReceiver(broadcastReceiverClass, instance) ||
                             isObjectAnimator(objectAnimatorClass, instance) ||
@@ -308,6 +313,21 @@ class HprofAnalyzer {
 
 
 
+                        // 检查Service泄露（参考LeakCanary：检查Service是否被ActivityThread持有）
+                        if (isService(serviceClass, instance)) {
+                            val serviceObjectId = instance.objectId
+                            // 如果Service不在ActivityThread的mServices中，说明Service已停止但仍被引用，认为是泄露
+                            if (!aliveServiceObjectIds.contains(serviceObjectId)) {
+                                val objectCounter = updateClassCounter(instance.instanceClassId)
+                                if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
+                                    leakingIds.add(instance.objectId)
+                                    stats.leakedServiceCount++
+                                    logger.debug("发现泄漏Service: ${instance.instanceClassName} (not held by ActivityThread but still reachable)")
+                                }
+                            }
+                            continue
+                        }
+
                         // 检查Dialog泄露
                         // 参考LeakCanary：Dialog泄露检测比较复杂，主要通过检查Dialog是否被静态引用持有
                         // 简化处理：如果Dialog被静态引用持有，且mShowing=false，就认为是泄露
@@ -449,7 +469,7 @@ class HprofAnalyzer {
                 is kshark.HeapAnalysisSuccess -> {
                     buildLeakingObjects(
                         heapAnalysis, graph, stats, bitmapMap, bitmapOutputDir,
-                        activityClass, fragmentClass, bitmapClass,
+                        activityClass, fragmentClass, bitmapClass, serviceClass,
                         dialogClass, broadcastReceiverClass, objectAnimatorClass, valueAnimatorClass
                     )
                 }
@@ -669,6 +689,7 @@ class HprofAnalyzer {
         activityClass: HeapClass?,
         fragmentClass: HeapClass?,
         bitmapClass: HeapClass?,
+        serviceClass: HeapClass?,
         dialogClass: HeapClass?,
         broadcastReceiverClass: HeapClass?,
         objectAnimatorClass: HeapClass?,
@@ -719,7 +740,13 @@ class HprofAnalyzer {
             }
         }
 
-
+        // Service泄露（参考LeakCanary：检查Service是否被ActivityThread持有）
+        if (serviceClass != null && isService(serviceClass, instance)) {
+            val aliveServiceObjectIds = getAliveServiceObjectIds(graph)
+            if (!aliveServiceObjectIds.contains(objectId)) {
+                return "Service Leak: not held by ActivityThread but still reachable"
+            }
+        }
 
         // Dialog泄露
         if (dialogClass != null && isDialog(dialogClass, instance)) {
@@ -794,6 +821,7 @@ class HprofAnalyzer {
         activityClass: HeapClass?,
         fragmentClass: HeapClass?,
         bitmapClass: HeapClass?,
+        serviceClass: HeapClass?,
         dialogClass: HeapClass?,
         broadcastReceiverClass: HeapClass?,
         objectAnimatorClass: HeapClass?,
@@ -923,7 +951,7 @@ class HprofAnalyzer {
 
                 val leakReason = determineLeakReason(
                     graph, leakingObjectId, leakTrace.leakingObject.className,
-                    activityClass, fragmentClass, bitmapClass,
+                    activityClass, fragmentClass, bitmapClass, serviceClass,
                     dialogClass, broadcastReceiverClass, objectAnimatorClass, valueAnimatorClass
                 )
 
@@ -1004,7 +1032,7 @@ class HprofAnalyzer {
 
                 val leakReason = determineLeakReason(
                     graph, leakingObjectId, leakTrace.leakingObject.className,
-                    activityClass, fragmentClass, bitmapClass,
+                    activityClass, fragmentClass, bitmapClass, serviceClass,
                     dialogClass, broadcastReceiverClass, objectAnimatorClass, valueAnimatorClass
                 )
 
@@ -1368,6 +1396,7 @@ class HprofAnalyzer {
         var leakedFragmentCount: Int = 0,
         var leakedBitmapCount: Int = 0,
         var leakedByteArrayCount: Int = 0,
+        var leakedServiceCount: Int = 0,
         var leakedDialogCount: Int = 0,
         var leakedBroadcastReceiverCount: Int = 0,
         var leakedAnimatorCount: Int = 0,
@@ -1979,6 +2008,7 @@ class HprofAnalyzer {
 
             // 泄露类型统计
             if (stats.leakedActivityCount > 0 || stats.leakedFragmentCount > 0 || 
+                stats.leakedServiceCount > 0 ||
                 stats.leakedDialogCount > 0 ||
                 stats.leakedBroadcastReceiverCount > 0 ||
                 stats.leakedAnimatorCount > 0) {
@@ -1987,6 +2017,7 @@ class HprofAnalyzer {
                 sb.appendLine("            <div class=\"stats-grid\">")
                 if (stats.leakedActivityCount > 0) sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Activity泄露</div><div class=\"value\">${stats.leakedActivityCount}</div></div>")
                 if (stats.leakedFragmentCount > 0) sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Fragment泄露</div><div class=\"value\">${stats.leakedFragmentCount}</div></div>")
+                if (stats.leakedServiceCount > 0) sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Service泄露</div><div class=\"value\">${stats.leakedServiceCount}</div></div>")
                 if (stats.leakedDialogCount > 0) sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Dialog泄露</div><div class=\"value\">${stats.leakedDialogCount}</div></div>")
                 if (stats.leakedBroadcastReceiverCount > 0) sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">BroadcastReceiver泄露</div><div class=\"value\">${stats.leakedBroadcastReceiverCount}</div></div>")
                 if (stats.leakedAnimatorCount > 0) sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Animator泄露</div><div class=\"value\">${stats.leakedAnimatorCount}</div></div>")

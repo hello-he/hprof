@@ -149,9 +149,9 @@ dump_heap() {
     print_info "清理旧文件..."
     adb shell rm -f "$DEVICE_HPROF_DIR/$hprof_name" 2>/dev/null || true
 
-    # 执行dumpheap
+    # 执行dumpheap（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
     print_info "正在 dump heap (这可能需要几秒钟)..."
-    if adb shell am dumpheap "$PACKAGE_NAME" "$DEVICE_HPROF_DIR/$hprof_name"; then
+    if adb shell am dumpheap -g -b png "$PACKAGE_NAME" "$DEVICE_HPROF_DIR/$hprof_name"; then
         print_success "dumpheap 命令已执行"
     else
         print_error "dumpheap 命令执行失败"

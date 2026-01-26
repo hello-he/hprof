@@ -2,8 +2,7 @@
 
 # 生成测试用的 hprof 文件脚本
 # 使用方法: ./scripts/generate_test_hprof.sh <leak_type>
-# leak_type: activity, fragment, view, viewmodel, service, dialog, handler_message, 
-#            broadcast_receiver, animator, bitmap, bytearray, all
+# leak_type: activity, fragment, dialog, broadcast_receiver, animator, bitmap, bytearray, all
 
 set -e
 
@@ -42,11 +41,7 @@ if [ -z "$LEAK_TYPE" ]; then
     echo "支持的泄露类型:"
     echo "  activity           - Activity 泄露"
     echo "  fragment           - Fragment 泄露"
-    echo "  view               - View 泄露"
-    echo "  viewmodel          - ViewModel 泄露"
-    echo "  service            - Service 泄露"
     echo "  dialog             - Dialog 泄露"
-    echo "  handler_message    - Handler/Message 泄露"
     echo "  broadcast_receiver - BroadcastReceiver 泄露"
     echo "  animator           - Animator 泄露"
     echo "  bitmap             - Bitmap 泄露"
@@ -84,16 +79,7 @@ case $LEAK_TYPE in
         adb shell am start -a "com.koom.leak.action.FRAGMENT_LEAK" -n "$ACTIVITY_NAME"
         sleep 2
         ;;
-    view)
-        echo "2. 触发 View 泄露..."
-        echo "   提示: 需要手动点击 'View泄露' 按钮，然后退出应用"
-        read -p "   按回车键继续（点击按钮后）..."
-        adb shell am force-stop "$PACKAGE_NAME"
-        sleep 1
-        adb shell am start -n "$ACTIVITY_NAME"
-        sleep 2
-        ;;
-    viewmodel|service|dialog|handler_message|broadcast_receiver|animator|bitmap|bytearray)
+    dialog|broadcast_receiver|animator|bitmap|bytearray)
         echo "2. 触发 ${LEAK_TYPE} 泄露..."
         echo "   提示: 需要手动点击对应的泄露按钮"
         read -p "   按回车键继续（点击按钮后）..."
@@ -111,9 +97,9 @@ case $LEAK_TYPE in
         ;;
 esac
 
-# Dump hprof
+# Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
 echo "3. Dump hprof..."
-adb shell am dumpheap "$PACKAGE_NAME" "$DEVICE_FILE"
+adb shell am dumpheap -g -b png "$PACKAGE_NAME" "$DEVICE_FILE"
 sleep 3
 
 # 检查文件是否生成

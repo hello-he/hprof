@@ -75,9 +75,9 @@ dump_heap() {
     print_info "清理旧文件..."
     adb shell rm -f "$device_path" 2>/dev/null || true
 
-    # 执行dumpheap
+    # 执行dumpheap（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
     print_info "正在 dump heap (这可能需要几秒钟)..."
-    if ! adb shell am dumpheap "$PACKAGE_NAME" "$device_path" 2>&1 | grep -q "File:"; then
+    if ! adb shell am dumpheap -g -b png "$PACKAGE_NAME" "$device_path" 2>&1 | grep -q "File:"; then
         print_error "dumpheap 命令执行失败"
         return 1
     fi
@@ -614,32 +614,6 @@ test_normal_fragment() {
     return 0
 }
 
-
-# 测试用例：Service正常使用
-test_normal_service() {
-    print_test "Service正常使用（不应该检测到泄露）"
-
-    if ! trigger_normal "com.koom.normal.action.SERVICE" "Service正常使用"; then
-        print_error "触发场景失败"
-        return 1
-    fi
-
-    # 等待Service正常停止
-    print_info "等待 Service 正常停止 (额外 2 秒)..."
-    sleep 2
-
-    if ! dump_heap "test_normal_service.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_normal_service.hprof" "service"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
 
 # 测试用例：Dialog正常使用
 test_normal_dialog() {

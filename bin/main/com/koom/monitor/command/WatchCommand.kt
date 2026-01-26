@@ -3,6 +3,7 @@ package com.koom.monitor.command
 import com.koom.monitor.adb.AdbClient
 import com.koom.monitor.model.MetricsSnapshot
 import com.koom.monitor.model.MonitorConfig
+import com.koom.monitor.model.ThresholdTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -111,6 +112,9 @@ class WatchCommand : Runnable {
             intervalSeconds = intervalSeconds,
             autoDump = !noAutoDump,
             maxIterations = maxIterations ?: 0,
+            maxOverThresholdCount = 3, // 默认连续3次超过阈值才触发
+            fastMemoryHighWatermarkThreshold = 0.9, // 90% 高水位线
+            fastMemoryDeltaThresholdKB = 51200, // 50MB 增量阈值
             adbPath = actualAdbPath
         )
     }
@@ -144,6 +148,8 @@ class WatchCommand : Runnable {
         val previousSnapshots = mutableMapOf<String, MetricsSnapshot>()
         // 记录每个包名是否已经dump过（参考KOOM，防止频繁dump）
         val hasDumped = mutableMapOf<String, Boolean>()
+        // 为每个包名创建阈值跟踪器（参考 KOOM）
+        val trackers = mutableMapOf<String, ThresholdTracker>()
         var iteration = 0
 
         while (config.maxIterations == 0 || iteration < config.maxIterations) {
@@ -151,6 +157,9 @@ class WatchCommand : Runnable {
 
             for (packageName in config.packageNames) {
                 val snapshot = adb.collectSnapshot(packageName) ?: continue
+
+                // 获取或创建阈值跟踪器
+                val tracker = trackers.getOrPut(packageName) { ThresholdTracker() }
 
                 val previous = previousSnapshots[packageName]
                 val prefix = if (previous != null) {
@@ -178,19 +187,88 @@ class WatchCommand : Runnable {
                     println("   🚨 线程泄露: $dupCount 种重复线程名 ($dupThreads)")
                 }
 
-                if (snapshot.isOverThreshold(config)) {
-                    val reasons = snapshot.getOverThresholdReasons(config)
-                    println("   ⚠️  超过阈值: ${reasons.joinToString(", ")}")
+                // 参考 KOOM：使用连续超过阈值检测 + 快速内存增长检测
+                var shouldDump = false
+                val dumpReasons = mutableListOf<String>()
 
-                    if (config.autoDump) {
-                        // 参考KOOM，每个包名只dump一次，防止频繁dump
-                        if (hasDumped[packageName] != true) {
-                            println("   🔔 触发dump...")
-                            performDump(snapshot, adb, config)
-                            hasDumped[packageName] = true
+                // 1. 检查快速内存增长（优先级最高，立即触发）
+                if (tracker.checkFastMemoryGrowth(
+                        snapshot.heapUsed,
+                        snapshot.heapMax,
+                        config.fastMemoryHighWatermarkThreshold,
+                        config.fastMemoryDeltaThresholdKB
+                    )) {
+                    shouldDump = true
+                    val heapRatio = snapshot.heapUsageRatio
+                    if (heapRatio > config.fastMemoryHighWatermarkThreshold) {
+                        dumpReasons.add("快速内存增长：高水位线 ${(heapRatio * 100).toInt()}% >= ${(config.fastMemoryHighWatermarkThreshold * 100).toInt()}%")
+                    } else {
+                        val previous = previousSnapshots[packageName]
+                        if (previous != null) {
+                            val deltaMB = (snapshot.heapUsed - previous.heapUsed) / (1024.0 * 1024)
+                            dumpReasons.add("快速内存增长：内存增量 ${"%.1f".format(deltaMB)}MB >= ${config.fastMemoryDeltaThresholdKB / 1024}MB")
                         } else {
-                            println("   ℹ️  已dump过，跳过（防止频繁dump）")
+                            dumpReasons.add("快速内存增长：内存增量 >= ${config.fastMemoryDeltaThresholdKB / 1024}MB")
                         }
+                    }
+                }
+
+                // 2. 检查连续超过阈值（需要连续多次）
+                val heapTriggered = tracker.checkHeapThreshold(
+                    snapshot.heapUsageRatio,
+                    config.heapThreshold,
+                    config.maxOverThresholdCount
+                )
+                val threadTriggered = tracker.checkThreadThreshold(
+                    snapshot.threadCount,
+                    config.threadThreshold,
+                    config.maxOverThresholdCount
+                )
+                val fdTriggered = tracker.checkFdThreshold(
+                    snapshot.fdCount,
+                    config.fdThreshold,
+                    config.maxOverThresholdCount
+                )
+
+                if (heapTriggered) {
+                    shouldDump = true
+                    dumpReasons.add("堆内存连续 ${config.maxOverThresholdCount} 次超过阈值 ${(config.heapThreshold * 100).toInt()}%")
+                }
+                if (threadTriggered) {
+                    shouldDump = true
+                    dumpReasons.add("线程数连续 ${config.maxOverThresholdCount} 次超过阈值 ${config.threadThreshold}")
+                }
+                if (fdTriggered) {
+                    shouldDump = true
+                    dumpReasons.add("文件句柄连续 ${config.maxOverThresholdCount} 次超过阈值 ${config.fdThreshold}")
+                }
+
+                // 3. 检查重复线程名（立即触发，不需要连续）
+                if (snapshot.hasDuplicateThreads && config.detectDuplicateThreads) {
+                    shouldDump = true
+                    val dupInfo = snapshot.duplicateThreads.take(3).joinToString(", ") { it.description }
+                    val more = if (snapshot.duplicateThreads.size > 3) "..." else ""
+                    dumpReasons.add("线程名字重复: $dupInfo$more")
+                }
+
+                // 显示超过阈值的信息（但不一定触发dump）
+                if (snapshot.isOverThreshold(config) && !shouldDump) {
+                    val reasons = snapshot.getOverThresholdReasons(config)
+                    println("   ⚠️  超过阈值: ${reasons.joinToString(", ")} (连续 ${tracker.heapOverThresholdCount}/${config.maxOverThresholdCount} 次)")
+                }
+
+                // 触发 dump
+                if (shouldDump && config.autoDump) {
+                    println("   ⚠️  触发条件: ${dumpReasons.joinToString(", ")}")
+                    // 参考KOOM，每个包名只dump一次，防止频繁dump
+                    if (hasDumped[packageName] != true) {
+                        println("   🔔 触发dump...")
+                        performDump(snapshot, adb, config)
+                        hasDumped[packageName] = true
+                        // dump 后重置跟踪器
+                        tracker.reset()
+                    } else {
+                        println("   ℹ️  已dump过，跳过（防止频繁dump）")
                     }
                 }
 

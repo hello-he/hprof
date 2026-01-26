@@ -119,8 +119,15 @@ class AdbClient(
 
     /**
      * 获取内存信息
+     * 参考 KOOM：使用 Runtime.maxMemory() 作为 heapMax
+     * 通过 ADB 无法直接获取，使用系统属性 dalvik.vm.heapgrowthlimit 或 dalvik.vm.heapsize 作为近似值
      */
     fun getMemoryInfo(pid: Int): MemoryInfo? {
+        // 首先尝试从系统属性获取 heapMax（更接近 Runtime.maxMemory()）
+        // dalvik.vm.heapgrowthlimit 是大多数应用的默认最大堆内存
+        // dalvik.vm.heapsize 是 largeHeap 应用的最大堆内存
+        var heapMax = getHeapMaxFromSystemProperties()
+        
         val result = shell("dumpsys meminfo $pid")
         if (result.exitCode != 0) {
             logger.error("获取内存信息失败: ${result.output}")
@@ -128,29 +135,107 @@ class AdbClient(
         }
 
         var heapUsed = 0L
-        var heapMax = 0L
         var vss: Long? = null
         var rss: Long? = null
 
-        result.output.lines().forEach { line ->
-            when {
-                line.contains("Java Heap:") && line.contains("kB") -> {
-                    val parts = line.split(Regex("\\s+"))
-                    // Java Heap: xxx kB
-                    if (parts.size >= 3) {
-                        heapUsed = (parts[1].toLongOrNull() ?: 0) * 1024
-                    }
+        // 首先找到包含 "Heap" "Size" "Alloc" 的标题行，确定列位置
+        var heapSizeIndex = -1
+        var heapAllocIndex = -1
+        val lines = result.output.lines().toList()
+        
+        for (i in lines.indices) {
+            val line = lines[i]
+            if (line.contains("Heap") && line.contains("Size") && line.contains("Alloc")) {
+                // 这是标题行，解析列位置
+                val headerParts = line.trim().split(Regex("\\s+"))
+                heapSizeIndex = headerParts.indexOf("Size")
+                heapAllocIndex = headerParts.indexOf("Alloc")
+                // 如果找不到，尝试从后往前查找（Heap Size, Heap Alloc, Heap Free）
+                if (heapSizeIndex == -1 || heapAllocIndex == -1) {
+                    // 从后往前：最后一列是 Heap Free，倒数第二列是 Heap Alloc，倒数第三列是 Heap Size
+                    heapSizeIndex = headerParts.size - 3
+                    heapAllocIndex = headerParts.size - 2
                 }
-                line.trim().startsWith("TOTAL:") && line.contains("kB") -> {
-                    val parts = line.trim().split(Regex("\\s+"))
-                    if (parts.size >= 3) {
-                        heapMax = (parts[1].toLongOrNull() ?: 0) * 1024
+                break
+            }
+        }
+
+        // 从 TOTAL 行解析 Heap Alloc（作为 heapUsed）
+        // TOTAL 行的格式: "        TOTAL   455995   437937     1516      144   613605   481194   363288   113705"
+        // 列顺序: TOTAL Pss Private Private SwapPss Rss Heap Size Heap Alloc Heap Free
+        // 使用 TOTAL Heap Alloc 作为 heapUsed（包括 Native Heap 和 Dalvik Heap）
+        if (heapAllocIndex >= 0) {
+            for (line in lines) {
+                val trimmed = line.trim()
+                if (trimmed.startsWith("TOTAL") && !trimmed.contains("PSS") && !trimmed.contains("RSS") && !trimmed.contains("SWAP")) {
+                    val parts = trimmed.split(Regex("\\s+"))
+                    if (parts.size > heapAllocIndex) {
+                        val heapAllocStr = parts[heapAllocIndex].replace(",", "")
+                        heapUsed = heapAllocStr.toLongOrNull()?.times(1024) ?: 0L
+                    }
+                    break
+                }
+            }
+        }
+
+        // 如果无法从 TOTAL 行获取，尝试从 Java Heap 行获取（作为后备方案）
+        if (heapUsed == 0L) {
+            result.output.lines().forEach { line ->
+                when {
+                    // 匹配格式: "           Java Heap:    18452                          48196"
+                    // 或: "Java Heap: xxx kB"
+                    line.contains("Java Heap:") -> {
+                        val parts = line.trim().split(Regex("\\s+"))
+                        // 查找数字（可能是 Pss 或 Rss 值）
+                        for (part in parts) {
+                            val value = part.replace(",", "").toLongOrNull()
+                            if (value != null && value > 0) {
+                                // 使用第一个找到的数字作为 heapUsed（通常是 Pss 值）
+                                heapUsed = value * 1024
+                                break
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // 如果无法从meminfo获取，尝试从/proc/status
+        // 如果无法从系统属性获取 heapMax，尝试从 dumpsys meminfo 获取（作为后备方案）
+        // 注意：dumpsys meminfo 中的 Heap Size 是当前已分配的堆内存，不是最大堆内存
+        // 所以这个值可能比 Runtime.maxMemory() 小
+        if (heapMax == 0L) {
+            // 从 dumpsys meminfo 的 TOTAL 行获取 Heap Size（当前已分配的堆内存）
+            val lines = result.output.lines().toList()
+            var heapSizeIndex = -1
+            
+            for (i in lines.indices) {
+                val line = lines[i]
+                if (line.contains("Heap") && line.contains("Size") && line.contains("Alloc")) {
+                    val headerParts = line.trim().split(Regex("\\s+"))
+                    heapSizeIndex = headerParts.indexOf("Size")
+                    if (heapSizeIndex == -1) {
+                        heapSizeIndex = headerParts.size - 3
+                    }
+                    break
+                }
+            }
+            
+            if (heapSizeIndex >= 0) {
+                for (line in lines) {
+                    val trimmed = line.trim()
+                    if (trimmed.startsWith("TOTAL") && !trimmed.contains("PSS") && !trimmed.contains("RSS") && !trimmed.contains("SWAP")) {
+                        val parts = trimmed.split(Regex("\\s+"))
+                        if (parts.size > heapSizeIndex) {
+                            val heapSizeStr = parts[heapSizeIndex].replace(",", "")
+                            heapMax = heapSizeStr.toLongOrNull()?.times(1024) ?: 0L
+                        }
+                        break
+                    }
+                }
+            }
+        }
+
+        // 如果还是无法获取，尝试从 /proc/status 获取 VSS（作为最后的后备方案）
         if (heapMax == 0L) {
             val statusResult = shell("cat /proc/$pid/status | grep -E 'VmPeak|VmSize|VmRSS'")
             statusResult.output.lines().forEach { line ->
@@ -164,6 +249,66 @@ class AdbClient(
         }
 
         return MemoryInfo(heapUsed, heapMax, vss, rss)
+    }
+
+    /**
+     * 从系统属性获取最大堆内存（参考 KOOM 使用 Runtime.maxMemory()）
+     * 
+     * 优先级：
+     * 1. dalvik.vm.heapgrowthlimit - 大多数应用的默认最大堆内存（对应 Runtime.maxMemory()）
+     * 2. dalvik.vm.heapsize - largeHeap 应用的最大堆内存
+     * 
+     * @return 最大堆内存（bytes），如果获取失败返回 0
+     */
+    private fun getHeapMaxFromSystemProperties(): Long {
+        // 首先尝试获取 heapgrowthlimit（大多数应用的默认值）
+        val heapgrowthlimitResult = shell("getprop dalvik.vm.heapgrowthlimit")
+        if (heapgrowthlimitResult.exitCode == 0) {
+            val value = parseMemorySize(heapgrowthlimitResult.output.trim())
+            if (value > 0) {
+                logger.debug("从 dalvik.vm.heapgrowthlimit 获取 heapMax: ${value / (1024 * 1024)}MB")
+                return value
+            }
+        }
+
+        // 如果 heapgrowthlimit 不可用，尝试获取 heapsize（largeHeap 应用）
+        val heapsizeResult = shell("getprop dalvik.vm.heapsize")
+        if (heapsizeResult.exitCode == 0) {
+            val value = parseMemorySize(heapsizeResult.output.trim())
+            if (value > 0) {
+                logger.debug("从 dalvik.vm.heapsize 获取 heapMax: ${value / (1024 * 1024)}MB")
+                return value
+            }
+        }
+
+        logger.warn("无法从系统属性获取 heapMax，将使用 dumpsys meminfo 中的值")
+        return 0L
+    }
+
+    /**
+     * 解析内存大小字符串（例如 "512m", "256m", "1g"）
+     * 
+     * @param sizeStr 内存大小字符串，例如 "512m", "256m", "1g"
+     * @return 内存大小（bytes）
+     */
+    private fun parseMemorySize(sizeStr: String): Long {
+        if (sizeStr.isEmpty()) return 0L
+        
+        val regex = Regex("^(\\d+)([kmgKMG])?$")
+        val match = regex.find(sizeStr.trim())
+        if (match != null) {
+            val value = match.groupValues[1].toLongOrNull() ?: return 0L
+            val unit = match.groupValues[2].lowercase()
+            
+            return when (unit) {
+                "k" -> value * 1024
+                "m" -> value * 1024 * 1024
+                "g" -> value * 1024 * 1024 * 1024
+                else -> value * 1024 * 1024 // 默认当作 MB
+            }
+        }
+        
+        return 0L
     }
 
     /**

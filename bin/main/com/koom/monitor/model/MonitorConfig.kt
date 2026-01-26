@@ -47,6 +47,15 @@ data class MonitorConfig(
     /** 监控间隔(秒) */
     val intervalSeconds: Long = 10L,
 
+    /** 连续超过阈值的次数才触发dump (参考 KOOM) */
+    val maxOverThresholdCount: Int = 3,
+
+    /** 快速内存增长检测：高水位线阈值 (0.0-1.0) */
+    val fastMemoryHighWatermarkThreshold: Double = 0.9,
+
+    /** 快速内存增长检测：内存增量阈值 (KB) */
+    val fastMemoryDeltaThresholdKB: Long = 51200, // 50MB
+
     /** ADB路径 */
     val adbPath: String = "adb"
 ) {

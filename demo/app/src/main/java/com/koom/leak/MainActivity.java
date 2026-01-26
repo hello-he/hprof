@@ -30,6 +30,9 @@ import android.widget.FrameLayout;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Timer;
@@ -56,6 +59,19 @@ public class MainActivity extends AppCompatActivity {
     private static List<Dialog> leakedDialogs = new ArrayList<>();
     private static List<Object> leakedReceivers = new ArrayList<>();  // 用于持有BroadcastReceiver引用
     private static List<Animator> leakedAnimators = new ArrayList<>();
+    
+    // 递增式泄露计数器（用于测试 watch 功能）
+    private static int incrementalLeakCount = 0;
+    
+    // 用于测试不同触发条件的计数器
+    private static int heapLeakCount = 0;  // 堆内存泄露计数
+    private static int threadLeakCount = 0;  // 线程泄露计数
+    private static int fdLeakCount = 0;  // 文件句柄泄露计数
+    private static int duplicateThreadCount = 0;  // 重复线程名计数
+    
+    // 文件句柄泄露列表
+    private static List<FileOutputStream> leakedFileStreams = new ArrayList<>();
+    private static List<Thread> leakedThreads = new ArrayList<>();
 
     private Handler handler = new Handler(Looper.getMainLooper());
     private int leakBatchCount = 0;
@@ -155,6 +171,23 @@ public class MainActivity extends AppCompatActivity {
         addLeakButton(layout, "🔥 Dialog泄露 (可被检测)", v -> createDialogLeak());
         addLeakButton(layout, "🔥 BroadcastReceiver泄露 (可被检测)", v -> createBroadcastReceiverLeak());
         addLeakButton(layout, "🔥 Animator泄露 (可被检测)", v -> createAnimatorLeak());
+
+        // ========== 递增式泄露（用于测试 watch 功能）==========
+        addSectionTitle(layout, "📈 递增式泄露（测试 watch 功能）");
+        addLeakButton(layout, "🔥 堆内存泄露 (+大Bitmap)", v -> createHeapMemoryLeak());
+        addLeakButton(layout, "🔥 线程数泄露 (+10线程)", v -> createThreadCountLeak());
+        addLeakButton(layout, "🔥 文件句柄泄露 (+10文件)", v -> createFdCountLeak());
+        addLeakButton(layout, "🔥 重复线程名泄露 (+10同名)", v -> createDuplicateThreadNameLeak());
+        TextView incrementalTipText = new TextView(this);
+        incrementalTipText.setText("💡 说明：分别测试 watch 的4种触发条件\n" +
+                "   1. 堆内存使用率超过阈值\n" +
+                "   2. 线程数超过阈值\n" +
+                "   3. 文件句柄数超过阈值\n" +
+                "   4. 重复线程名检测");
+        incrementalTipText.setTextSize(12);
+        incrementalTipText.setTextColor(Color.rgb(0, 100, 200));
+        incrementalTipText.setPadding(20, 5, 20, 15);
+        layout.addView(incrementalTipText);
 
         TextView activityTipText = new TextView(this);
         activityTipText.setText("💡 说明：点击后会退出app，重新打开可检测到泄露");
@@ -570,6 +603,29 @@ public class MainActivity extends AppCompatActivity {
         leakedDialogs.clear();
         leakedReceivers.clear();
         leakedAnimators.clear();
+        
+        // 重置递增式泄露计数器
+        incrementalLeakCount = 0;
+        heapLeakCount = 0;
+        threadLeakCount = 0;
+        fdLeakCount = 0;
+        duplicateThreadCount = 0;
+        
+        // 停止并清理泄露的线程
+        for (Thread thread : leakedThreads) {
+            thread.interrupt();
+        }
+        leakedThreads.clear();
+        
+        // 关闭并清理泄露的文件流
+        for (FileOutputStream fos : leakedFileStreams) {
+            try {
+                fos.close();
+            } catch (IOException e) {
+                // 忽略关闭错误
+            }
+        }
+        leakedFileStreams.clear();
 
         // 停止并清空线程
         for (LeakRunnable runnable : leakedRunnables) {
@@ -1004,6 +1060,178 @@ public class MainActivity extends AppCompatActivity {
         showToast("创建Animator泄露 (无限循环)");
     }
 
+    // ==================== 递增式泄露（用于测试 watch 功能）===================
+
+    /**
+     * 创建堆内存泄露（测试堆内存使用率超过阈值）
+     * 每次调用都会创建大 Bitmap，增加堆内存使用率
+     */
+    private void createHeapMemoryLeak() {
+        heapLeakCount++;
+        
+        // 创建大 Bitmap（1920x1920，约 15MB）
+        // 注意：减少大小以避免在测试过程中触发 OOM
+        // 256MB 堆内存限制下，可以创建约 10-15 个 15MB 的 Bitmap
+        Bitmap bitmap = Bitmap.createBitmap(1920, 1920, Bitmap.Config.ARGB_8888);
+        fillBitmap(bitmap, heapLeakCount);
+        leakedBitmaps.add(bitmap);
+        
+        leakBatchCount++;
+        updateStatus();
+        
+        long usedMemory = runtime.totalMemory() - runtime.freeMemory();
+        long usedMemoryMB = usedMemory / (1024 * 1024);
+        long maxMemoryMB = runtime.maxMemory() / (1024 * 1024);
+        showToast("创建堆内存泄露 #" + heapLeakCount + "\n" +
+                "已创建: 大Bitmap (1920x1920, ~15MB)\n" +
+                "当前内存: " + usedMemoryMB + " MB / " + maxMemoryMB + " MB");
+    }
+
+    /**
+     * 创建线程数泄露（测试线程数超过阈值）
+     * 每次调用都会创建新线程，增加线程数
+     */
+    private void createThreadCountLeak() {
+        threadLeakCount++;
+        
+        // 每次创建10个线程
+        for (int i = 0; i < 10; i++) {
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        // 线程保持运行状态
+                        Thread.sleep(Long.MAX_VALUE);
+                    } catch (InterruptedException e) {
+                        // 被中断时退出
+                    }
+                }
+            }, "LeakThread-" + threadLeakCount + "-" + i);
+            thread.setDaemon(false); // 非守护线程
+            leakedThreads.add(thread);
+            thread.start();
+        }
+        
+        leakBatchCount += 10;
+        updateStatus();
+        showToast("创建线程数泄露 #" + threadLeakCount + "\n" +
+                "已创建: 10个线程 (共 " + leakedThreads.size() + " 个)");
+    }
+
+    /**
+     * 创建文件句柄泄露（测试文件句柄数超过阈值）
+     * 每次调用都会打开新文件，增加文件句柄数
+     */
+    private void createFdCountLeak() {
+        fdLeakCount++;
+        
+        // 每次打开10个文件（不关闭，造成泄露）
+        for (int i = 0; i < 10; i++) {
+            try {
+                File file = new File(getCacheDir(), "leak_file_" + fdLeakCount + "_" + i + ".tmp");
+                FileOutputStream fos = new FileOutputStream(file);
+                // 写入一些数据
+                fos.write(("Leak data " + fdLeakCount + "-" + i).getBytes());
+                // 不关闭流，造成文件句柄泄露
+                leakedFileStreams.add(fos);
+            } catch (IOException e) {
+                Log.e(TAG, "创建文件失败", e);
+            }
+        }
+        
+        leakBatchCount += 10;
+        updateStatus();
+        showToast("创建文件句柄泄露 #" + fdLeakCount + "\n" +
+                "已打开: 10个文件 (共 " + leakedFileStreams.size() + " 个)");
+    }
+
+    /**
+     * 创建重复线程名泄露（测试重复线程名检测）
+     * 每次调用都会创建同名线程，触发重复线程名检测
+     */
+    private void createDuplicateThreadNameLeak() {
+        duplicateThreadCount++;
+        
+        // 每次创建10个同名线程
+        String threadName = "DuplicateThread-" + (duplicateThreadCount / 10);
+        for (int i = 0; i < 10; i++) {
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Thread.sleep(Long.MAX_VALUE);
+                    } catch (InterruptedException e) {
+                    }
+                }
+            }, threadName);
+            thread.setDaemon(false);
+            leakedThreads.add(thread);
+            thread.start();
+        }
+        
+        leakBatchCount += 10;
+        updateStatus();
+        showToast("创建重复线程名泄露 #" + duplicateThreadCount + "\n" +
+                "已创建: 10个同名线程 (" + threadName + ")");
+    }
+
+    /**
+     * 创建递增式泄露（通用方法，已废弃，保留用于兼容）
+     * 每次调用都会创建新的泄露对象，用于测试 watch 模式的内存监控功能
+     * 创建多种类型的泄露：Bitmap、Dialog、BroadcastReceiver、Animator
+     */
+    private void createIncrementalLeak() {
+        incrementalLeakCount++;
+        
+        // 1. 创建 Bitmap 泄露（大对象，容易观察内存增长）
+        Bitmap bitmap = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888);
+        fillBitmap(bitmap, incrementalLeakCount);
+        leakedBitmaps.add(bitmap);
+        
+        // 2. 创建 Dialog 泄露
+        Dialog dialog = new Dialog(this);
+        dialog.setTitle("Leak Dialog #" + incrementalLeakCount);
+        dialog.setContentView(new TextView(this));
+        dialog.show();
+        dialog.dismiss();
+        leakedDialogs.add(dialog);
+        
+        // 3. 创建 BroadcastReceiver 泄露
+        LeakBroadcastReceiver leakReceiver = new LeakBroadcastReceiver();
+        leakedReceivers.add(leakReceiver);
+        IntentFilter filter = new IntentFilter("com.koom.leak.TEST_ACTION_" + incrementalLeakCount);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(leakReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(leakReceiver, filter);
+        }
+        
+        // 4. 创建 Animator 泄露
+        View view = new View(this);
+        ObjectAnimator animator = ObjectAnimator.ofFloat(view, "alpha", 0f, 1f);
+        animator.setRepeatCount(ValueAnimator.INFINITE);
+        animator.setDuration(1000);
+        animator.start();
+        leakedAnimators.add(animator);
+        
+        leakBatchCount++;
+        updateStatus();
+        
+        // 更新提示文字
+        TextView incrementalTipText = findViewById(android.R.id.text1);
+        if (incrementalTipText != null) {
+            incrementalTipText.setText("💡 说明：每次点击都会创建新的泄露对象（Bitmap、Dialog、BroadcastReceiver、Animator），\n" +
+                    "   用于测试 watch 模式的内存监控功能。当前泄露批次: " + incrementalLeakCount);
+        }
+        
+        // 显示内存使用情况
+        long usedMemory = runtime.totalMemory() - runtime.freeMemory();
+        long usedMemoryMB = usedMemory / (1024 * 1024);
+        showToast("创建递增式泄露 #" + incrementalLeakCount + "\n" +
+                "已创建: Bitmap、Dialog、BroadcastReceiver、Animator\n" +
+                "当前内存: " + usedMemoryMB + " MB");
+    }
+
     // ==================== Fragment泄露 ====================
 
     /**
@@ -1072,6 +1300,11 @@ public class MainActivity extends AppCompatActivity {
      * - com.koom.leak.action.DIALOG_LEAK
      * - com.koom.leak.action.BROADCAST_RECEIVER_LEAK
      * - com.koom.leak.action.ANIMATOR_LEAK
+     * - com.koom.leak.action.INCREMENTAL_LEAK
+     * - com.koom.leak.action.HEAP_MEMORY_LEAK
+     * - com.koom.leak.action.THREAD_COUNT_LEAK
+     * - com.koom.leak.action.FD_COUNT_LEAK
+     * - com.koom.leak.action.DUPLICATE_THREAD_NAME_LEAK
      */
     private void handleIntentLeak() {
         Intent intent = getIntent();
@@ -1136,6 +1369,21 @@ public class MainActivity extends AppCompatActivity {
             case "com.koom.leak.action.ANIMATOR_LEAK":
                 createAnimatorLeak();
                 showToast("已触发Animator泄露");
+                break;
+            case "com.koom.leak.action.INCREMENTAL_LEAK":
+                createIncrementalLeak();
+                break;
+            case "com.koom.leak.action.HEAP_MEMORY_LEAK":
+                createHeapMemoryLeak();
+                break;
+            case "com.koom.leak.action.THREAD_COUNT_LEAK":
+                createThreadCountLeak();
+                break;
+            case "com.koom.leak.action.FD_COUNT_LEAK":
+                createFdCountLeak();
+                break;
+            case "com.koom.leak.action.DUPLICATE_THREAD_NAME_LEAK":
+                createDuplicateThreadNameLeak();
                 break;
         }
     }

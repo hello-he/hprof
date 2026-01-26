@@ -1771,11 +1771,12 @@ class HprofAnalyzer {
 
                 val byType = leakingObjects.groupBy { obj ->
                     // 优先使用 leakReason 判断类型，更准确
+                    // 注意：检查顺序很重要，Service 要在 Activity 之前，因为 "ActivityThread" 包含 "Activity"
                     when {
                         obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "BroadcastReceiver"
+                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Service"
                         obj.leakReason.contains("Activity", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Activity"
                         obj.leakReason.contains("Fragment", ignoreCase = true) -> "Fragment"
-                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Service"
                         obj.leakReason.contains("Dialog", ignoreCase = true) -> "Dialog"
                         obj.leakReason.contains("Handler") || obj.leakReason.contains("Message", ignoreCase = true) -> "Handler/Message"
                         obj.leakReason.contains("Animator", ignoreCase = true) -> "Animator"
@@ -1784,9 +1785,9 @@ class HprofAnalyzer {
                         obj.leakReason.contains("View", ignoreCase = true) && !obj.leakReason.contains("ViewGroup", ignoreCase = true) -> "View"
                         // 如果 leakReason 无法判断，回退到类名判断
                         obj.className.contains("BroadcastReceiver") -> "BroadcastReceiver"
+                        obj.className.contains("Service") -> "Service"
                         obj.className.contains("Activity") -> "Activity"
                         obj.className.contains("Fragment") -> "Fragment"
-                        obj.className.contains("Service") -> "Service"
                         obj.className.contains("Dialog") -> "Dialog"
                         obj.className.contains("Message") -> "Handler/Message"
                         obj.className.contains("Animator") -> "Animator"
@@ -1974,13 +1975,45 @@ class HprofAnalyzer {
                 }
                 sb.appendLine("            </div>")
 
-                // 显示同名线程详情
+                // 显示所有线程名列表（使用标签样式，和"检测到的应用包"一样）
+                val allThreads = stats.threadNameCount.entries.sortedByDescending { it.value }
+                if (allThreads.isNotEmpty()) {
+                    sb.appendLine("            <div style=\"margin-top: 15px;\">")
+                    sb.appendLine("                <div style=\"font-weight: 600; margin-bottom: 10px; color: #333;\">所有线程列表:</div>")
+                    sb.appendLine("                <div class=\"package-list\">")
+                    allThreads.forEach { (name, count) ->
+                        val isFrequent = count >= 3
+                        val tagStyle = if (isFrequent) {
+                            "background: #fff3e0; color: #ff9800; border: 1px solid #ff9800;"
+                        } else {
+                            "background: #e3f2fd; color: #1976d2;"
+                        }
+                        // 数量为1时不显示数量，大于1时才显示
+                        val displayText = if (count > 1) {
+                            "${escapeHtml(name)} ($count)"
+                        } else {
+                            escapeHtml(name)
+                        }
+                        sb.appendLine("                    <span class=\"package-tag\" style=\"$tagStyle\">$displayText</span>")
+                    }
+                    sb.appendLine("                </div>")
+                    sb.appendLine("            </div>")
+                }
+
+                // 显示同名线程详情（如果存在）
                 if (frequentThreads.isNotEmpty()) {
-                    sb.appendLine("            <div style=\"margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 6px;\">")
-                    sb.appendLine("                <div style=\"font-weight: 600; margin-bottom: 10px; color: #333;\">同名线程详情:</div>")
+                    sb.appendLine("            <div style=\"margin-top: 15px; padding: 15px; background: #fff3e0; border-radius: 6px; border-left: 4px solid #ff9800;\">")
+                    sb.appendLine("                <div style=\"font-weight: 600; margin-bottom: 10px; color: #333;\">⚠️ 同名线程警告 (≥3个，可能存在线程泄露):</div>")
                     frequentThreads.forEach { (name, count) ->
                         sb.appendLine("                <div style=\"padding: 5px 0; font-size: 13px;\">")
                         sb.appendLine("                    <span style=\"color: #666;\">$name:</span> <span style=\"font-weight: 600; color: #ff9800;\">$count 个</span>")
+                        sb.appendLine("                </div>")
+                    }
+                    // 如果有多组重复线程（≥2组），显示统计信息
+                    if (frequentThreads.size >= 2) {
+                        val avgCount = frequentThreads.map { it.value }.average().toInt()
+                        sb.appendLine("                <div style=\"margin-top: 10px; padding-top: 10px; border-top: 1px solid #ffcc80; font-size: 13px; color: #666;\">")
+                        sb.appendLine("                    多组重复线程: <span style=\"font-weight: 600; color: #ff9800;\">${frequentThreads.size}种</span> x <span style=\"font-weight: 600; color: #ff9800;\">$avgCount</span> (平均)")
                         sb.appendLine("                </div>")
                     }
                     sb.appendLine("            </div>")
@@ -2096,11 +2129,12 @@ class HprofAnalyzer {
 
                 val byType = leakingObjects.groupBy { obj ->
                     // 优先使用 leakReason 判断类型，更准确
+                    // 注意：检查顺序很重要，Service 要在 Activity 之前，因为 "ActivityThread" 包含 "Activity"
                     when {
                         obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "receiver"
+                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "service"
                         obj.leakReason.contains("Activity", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "activity"
                         obj.leakReason.contains("Fragment", ignoreCase = true) -> "fragment"
-                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "service"
                         obj.leakReason.contains("Dialog", ignoreCase = true) -> "dialog"
                         obj.leakReason.contains("Handler") || obj.leakReason.contains("Message", ignoreCase = true) -> "handler"
                         obj.leakReason.contains("Animator", ignoreCase = true) -> "animator"
@@ -2109,9 +2143,9 @@ class HprofAnalyzer {
                         obj.leakReason.contains("View", ignoreCase = true) && !obj.leakReason.contains("ViewGroup", ignoreCase = true) -> "view"
                         // 如果 leakReason 无法判断，回退到类名判断
                         obj.className.contains("BroadcastReceiver") -> "receiver"
+                        obj.className.contains("Service") -> "service"
                         obj.className.contains("Activity") -> "activity"
                         obj.className.contains("Fragment") -> "fragment"
-                        obj.className.contains("Service") -> "service"
                         obj.className.contains("Dialog") -> "dialog"
                         obj.className.contains("Message") -> "handler"
                         obj.className.contains("Animator") -> "animator"

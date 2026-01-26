@@ -1771,16 +1771,18 @@ class HprofAnalyzer {
 
                 val byType = leakingObjects.groupBy { obj ->
                     when {
+                        // 先检查更具体的类型，避免误判
+                        obj.className.contains("BroadcastReceiver") -> "BroadcastReceiver"
                         obj.className.contains("Activity") -> "Activity"
                         obj.className.contains("Fragment") -> "Fragment"
-                        obj.className.contains("View") && !obj.className.contains("ViewGroup") -> "View"
-                        obj.className.contains("ViewModel") -> "ViewModel"
                         obj.className.contains("Service") -> "Service"
                         obj.className.contains("Dialog") -> "Dialog"
                         obj.className.contains("Message") -> "Handler/Message"
-                        obj.className.contains("BroadcastReceiver") -> "BroadcastReceiver"
                         obj.className.contains("Animator") -> "Animator"
                         obj.className.contains("Bitmap") -> "Bitmap"
+                        obj.className.contains("ViewModel") -> "ViewModel"
+                        // View 检查放在最后，避免误判包含 "View" 的其他类型
+                        obj.className.contains("View") && !obj.className.contains("ViewGroup") -> "View"
                         else -> "Other"
                     }
                 }
@@ -2084,16 +2086,18 @@ class HprofAnalyzer {
 
                 val byType = leakingObjects.groupBy { obj ->
                     when {
+                        // 先检查更具体的类型，避免误判
+                        obj.className.contains("BroadcastReceiver") -> "receiver"
                         obj.className.contains("Activity") -> "activity"
                         obj.className.contains("Fragment") -> "fragment"
-                        obj.className.contains("View") && !obj.className.contains("ViewGroup") -> "view"
-                        obj.className.contains("ViewModel") -> "viewmodel"
                         obj.className.contains("Service") -> "service"
                         obj.className.contains("Dialog") -> "dialog"
                         obj.className.contains("Message") -> "handler"
-                        obj.className.contains("BroadcastReceiver") -> "receiver"
                         obj.className.contains("Animator") -> "animator"
                         obj.className.contains("Bitmap") -> "bitmap"
+                        obj.className.contains("ViewModel") -> "viewmodel"
+                        // View 检查放在最后，避免误判包含 "View" 的其他类型
+                        obj.className.contains("View") && !obj.className.contains("ViewGroup") -> "view"
                         else -> "other"
                     }
                 }

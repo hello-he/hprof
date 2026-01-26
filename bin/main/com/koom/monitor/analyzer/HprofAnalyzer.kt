@@ -1770,8 +1770,19 @@ class HprofAnalyzer {
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
                 val byType = leakingObjects.groupBy { obj ->
+                    // 优先使用 leakReason 判断类型，更准确
                     when {
-                        // 先检查更具体的类型，避免误判
+                        obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "BroadcastReceiver"
+                        obj.leakReason.contains("Activity", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Activity"
+                        obj.leakReason.contains("Fragment", ignoreCase = true) -> "Fragment"
+                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Service"
+                        obj.leakReason.contains("Dialog", ignoreCase = true) -> "Dialog"
+                        obj.leakReason.contains("Handler") || obj.leakReason.contains("Message", ignoreCase = true) -> "Handler/Message"
+                        obj.leakReason.contains("Animator", ignoreCase = true) -> "Animator"
+                        obj.leakReason.contains("Bitmap", ignoreCase = true) -> "Bitmap"
+                        obj.leakReason.contains("ViewModel", ignoreCase = true) -> "ViewModel"
+                        obj.leakReason.contains("View", ignoreCase = true) && !obj.leakReason.contains("ViewGroup", ignoreCase = true) -> "View"
+                        // 如果 leakReason 无法判断，回退到类名判断
                         obj.className.contains("BroadcastReceiver") -> "BroadcastReceiver"
                         obj.className.contains("Activity") -> "Activity"
                         obj.className.contains("Fragment") -> "Fragment"
@@ -1781,7 +1792,6 @@ class HprofAnalyzer {
                         obj.className.contains("Animator") -> "Animator"
                         obj.className.contains("Bitmap") -> "Bitmap"
                         obj.className.contains("ViewModel") -> "ViewModel"
-                        // View 检查放在最后，避免误判包含 "View" 的其他类型
                         obj.className.contains("View") && !obj.className.contains("ViewGroup") -> "View"
                         else -> "Other"
                     }
@@ -2085,8 +2095,19 @@ class HprofAnalyzer {
                 sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🚨</span>内存泄露对象 (${leakingObjects.size})</div>")
 
                 val byType = leakingObjects.groupBy { obj ->
+                    // 优先使用 leakReason 判断类型，更准确
                     when {
-                        // 先检查更具体的类型，避免误判
+                        obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "receiver"
+                        obj.leakReason.contains("Activity", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "activity"
+                        obj.leakReason.contains("Fragment", ignoreCase = true) -> "fragment"
+                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "service"
+                        obj.leakReason.contains("Dialog", ignoreCase = true) -> "dialog"
+                        obj.leakReason.contains("Handler") || obj.leakReason.contains("Message", ignoreCase = true) -> "handler"
+                        obj.leakReason.contains("Animator", ignoreCase = true) -> "animator"
+                        obj.leakReason.contains("Bitmap", ignoreCase = true) -> "bitmap"
+                        obj.leakReason.contains("ViewModel", ignoreCase = true) -> "viewmodel"
+                        obj.leakReason.contains("View", ignoreCase = true) && !obj.leakReason.contains("ViewGroup", ignoreCase = true) -> "view"
+                        // 如果 leakReason 无法判断，回退到类名判断
                         obj.className.contains("BroadcastReceiver") -> "receiver"
                         obj.className.contains("Activity") -> "activity"
                         obj.className.contains("Fragment") -> "fragment"
@@ -2096,7 +2117,6 @@ class HprofAnalyzer {
                         obj.className.contains("Animator") -> "animator"
                         obj.className.contains("Bitmap") -> "bitmap"
                         obj.className.contains("ViewModel") -> "viewmodel"
-                        // View 检查放在最后，避免误判包含 "View" 的其他类型
                         obj.className.contains("View") && !obj.className.contains("ViewGroup") -> "view"
                         else -> "other"
                     }

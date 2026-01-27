@@ -633,7 +633,7 @@ class HprofAnalyzer {
 
         logger.debug("发现 ${stats.threadCount} 个线程")
         stats.threadNameCount.forEach { (name, count) ->
-            if (count >= 3) {  // 同名线程超过3个就记录
+            if (count > 5) {  // 同名线程超过5个就记录（不包含等于5）
                 logger.debug("  - $name: $count 个")
             }
         }
@@ -1469,10 +1469,10 @@ class HprofAnalyzer {
                 println("   总线程数: ${stats.threadCount}")
 
                 // 显示同名线程数量较多的
-                val frequentThreads = stats.threadNameCount.filter { it.value >= 3 }
+                val frequentThreads = stats.threadNameCount.filter { it.value > 5 }
                     .entries.sortedByDescending { it.value }
                 if (frequentThreads.isNotEmpty()) {
-                    println("   同名线程(≥3个):")
+                    println("   同名线程(>5个):")
                     frequentThreads.forEach { (name, count) ->
                         println("      - $name: $count 个")
                     }
@@ -1684,11 +1684,26 @@ class HprofAnalyzer {
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 sb.appendLine("   总线程数: ${stats.threadCount}")
 
+                // 显示所有线程名列表
+                val allThreads = stats.threadNameCount.entries.sortedByDescending { it.value }
+                if (allThreads.isNotEmpty()) {
+                    sb.appendLine("   所有线程列表:")
+                    allThreads.forEach { (name, count) ->
+                        // 数量为1时不显示数量，大于1时才显示
+                        if (count > 1) {
+                            sb.appendLine("      - $name ($count)")
+                        } else {
+                            sb.appendLine("      - $name")
+                        }
+                    }
+                    sb.appendLine()
+                }
+
                 // 显示同名线程数量较多的
-                val frequentThreads = stats.threadNameCount.filter { it.value >= 3 }
+                val frequentThreads = stats.threadNameCount.filter { it.value > 5 }
                     .entries.sortedByDescending { it.value }
                 if (frequentThreads.isNotEmpty()) {
-                    sb.appendLine("   同名线程(≥3个):")
+                    sb.appendLine("   ⚠️ 同名线程警告 (>5个，可能存在线程泄露):")
                     frequentThreads.forEach { (name, count) ->
                         sb.appendLine("      - $name: $count 个")
                     }
@@ -1696,8 +1711,8 @@ class HprofAnalyzer {
                     if (frequentThreads.size >= 2) {
                         sb.appendLine("   多组重复线程: ${frequentThreads.size}种 x ${frequentThreads.map { it.value }.average().toInt()} (平均)")
                     }
+                    sb.appendLine()
                 }
-                sb.appendLine()
             }
 
             if (stats.detectedPackages.isNotEmpty()) {
@@ -1771,11 +1786,12 @@ class HprofAnalyzer {
 
                 val byType = leakingObjects.groupBy { obj ->
                     // 优先使用 leakReason 判断类型，更准确
+                    // 注意：检查顺序很重要，Service 要在 Activity 之前，因为 "ActivityThread" 包含 "Activity"
                     when {
                         obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "BroadcastReceiver"
+                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Service"
                         obj.leakReason.contains("Activity", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Activity"
                         obj.leakReason.contains("Fragment", ignoreCase = true) -> "Fragment"
-                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Service"
                         obj.leakReason.contains("Dialog", ignoreCase = true) -> "Dialog"
                         obj.leakReason.contains("Handler") || obj.leakReason.contains("Message", ignoreCase = true) -> "Handler/Message"
                         obj.leakReason.contains("Animator", ignoreCase = true) -> "Animator"
@@ -1784,9 +1800,9 @@ class HprofAnalyzer {
                         obj.leakReason.contains("View", ignoreCase = true) && !obj.leakReason.contains("ViewGroup", ignoreCase = true) -> "View"
                         // 如果 leakReason 无法判断，回退到类名判断
                         obj.className.contains("BroadcastReceiver") -> "BroadcastReceiver"
+                        obj.className.contains("Service") -> "Service"
                         obj.className.contains("Activity") -> "Activity"
                         obj.className.contains("Fragment") -> "Fragment"
-                        obj.className.contains("Service") -> "Service"
                         obj.className.contains("Dialog") -> "Dialog"
                         obj.className.contains("Message") -> "Handler/Message"
                         obj.className.contains("Animator") -> "Animator"
@@ -1925,6 +1941,32 @@ class HprofAnalyzer {
             sb.appendLine("        .info-box { background: #e3f2fd; padding: 15px; border-radius: 6px; margin-top: 15px; }")
             sb.appendLine("        .info-box .title { font-weight: 600; color: #1976d2; margin-bottom: 10px; }")
             sb.appendLine("        .info-box .link { color: #1976d2; text-decoration: none; }")
+            sb.appendLine("        .leak-summary { margin-top: 20px; padding: 20px; background: rgba(255,255,255,0.15); border-radius: 8px; backdrop-filter: blur(10px); }")
+            sb.appendLine("        .leak-summary.no-leak { background: rgba(76,175,80,0.2); }")
+            sb.appendLine("        .leak-summary.has-leak { background: rgba(244,67,54,0.2); }")
+            sb.appendLine("        .leak-summary-title { font-size: 16px; font-weight: 600; margin-bottom: 15px; display: flex; align-items: center; }")
+            sb.appendLine("        .leak-summary-title .icon { margin-right: 8px; font-size: 20px; }")
+            sb.appendLine("        .leak-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }")
+            sb.appendLine("        .leak-summary-item { background: rgba(255,255,255,0.9); padding: 10px; border-radius: 6px; text-align: center; }")
+            sb.appendLine("        .leak-summary-item .label { font-size: 11px; color: #666; margin-bottom: 5px; }")
+            sb.appendLine("        .leak-summary-item .value { font-size: 20px; font-weight: 700; color: #c62828; }")
+            sb.appendLine("        .leak-summary-item .value.zero { color: #4caf50; }")
+            sb.appendLine("        .leak-section { background: #ffebee; border-left: 5px solid #f44336; margin-bottom: 20px; }")
+            sb.appendLine("        .leak-section .section-title { color: #c62828; font-size: 20px; }")
+            sb.appendLine("        .nav-bar { position: sticky; top: 0; background: white; border-bottom: 2px solid #eee; padding: 12px 25px; z-index: 100; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }")
+            sb.appendLine("        .nav-bar .nav-links { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; }")
+            sb.appendLine("        .nav-bar .nav-link { color: #667eea; text-decoration: none; padding: 6px 12px; border-radius: 4px; font-size: 13px; transition: all 0.2s; }")
+            sb.appendLine("        .nav-bar .nav-link:hover { background: #f0f0f0; color: #764ba2; }")
+            sb.appendLine("        .nav-bar .nav-link.active { background: #667eea; color: white; }")
+            sb.appendLine("        .collapsible { cursor: pointer; user-select: none; }")
+            sb.appendLine("        .collapsible::before { content: '▼ '; display: inline-block; margin-right: 5px; transition: transform 0.3s; font-size: 12px; }")
+            sb.appendLine("        .collapsible.collapsed::before { transform: rotate(-90deg); }")
+            sb.appendLine("        .collapsible-content { overflow: hidden; transition: max-height 0.3s ease-out; }")
+            sb.appendLine("        .collapsible-content.collapsed { max-height: 0; padding-top: 0; padding-bottom: 0; }")
+            sb.appendLine("        .data-table { width: 100%; border-collapse: collapse; margin-top: 15px; }")
+            sb.appendLine("        .data-table th, .data-table td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; }")
+            sb.appendLine("        .data-table th { background: #f8f9fa; font-weight: 600; color: #333; }")
+            sb.appendLine("        .data-table tr:hover { background: #f8f9fa; }")
             sb.appendLine("    </style>")
             sb.appendLine("</head>")
             sb.appendLine("<body>")
@@ -1934,97 +1976,69 @@ class HprofAnalyzer {
             sb.appendLine("            <div class=\"meta\">")
             sb.appendLine("                文件: ${file.name} | 大小: ${stats.formatSize(fileSize)} | 分析耗时: ${analyzeTime}ms")
             sb.appendLine("            </div>")
-            sb.appendLine("        </div>")
-
-            // 对象统计
-            sb.appendLine("        <div class=\"section\">")
-            sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📊</span>对象统计</div>")
-            sb.appendLine("            <div class=\"stats-grid\">")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">总类数</div><div class=\"value\">${"%,d".format(stats.totalClassCount)}</div></div>")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">总实例数</div><div class=\"value\">${"%,d".format(stats.totalInstanceCount)}</div></div>")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">对象数组</div><div class=\"value\">${"%,d".format(stats.objectArrayCount)}</div></div>")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">基本类型数组</div><div class=\"value\">${"%,d".format(stats.primitiveArrayCount)}</div></div>")
-            sb.appendLine("            </div>")
-            sb.appendLine("        </div>")
-
-            // 按包分类
-            sb.appendLine("        <div class=\"section\">")
-            sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📱</span>按包分类</div>")
-            sb.appendLine("            <div class=\"stats-grid\">")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Android</div><div class=\"value\">${"%,d".format(stats.androidCount)}</div></div>")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">AndroidX</div><div class=\"value\">${"%,d".format(stats.androidxCount)}</div></div>")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Java</div><div class=\"value\">${"%,d".format(stats.javaCount)}</div></div>")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Kotlin</div><div class=\"value\">${"%,d".format(stats.kotlinCount)}</div></div>")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">应用类</div><div class=\"value\">${"%,d".format(stats.appClassCount)}</div></div>")
-            sb.appendLine("            </div>")
-            sb.appendLine("        </div>")
-
-            // 线程统计
-            if (stats.threadCount > 0) {
-                sb.appendLine("        <div class=\"section\">")
-                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🧵</span>线程统计</div>")
-                sb.appendLine("            <div class=\"stats-grid\">")
-                sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">总线程数</div><div class=\"value\">${stats.threadCount}</div></div>")
-
-                // 同名线程数量较多的
-                val frequentThreads = stats.threadNameCount.filter { it.value >= 3 }
-                    .entries.sortedByDescending { it.value }
-                if (frequentThreads.isNotEmpty()) {
-                    sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">同名线程(≥3)</div><div class=\"value\">${frequentThreads.size} 种</div></div>")
+            
+            // 泄露摘要
+            // 检查是否有线程泄露
+            val threadLeaks = stats.threadNameCount.filter { it.value > 5 }
+            val hasThreadLeak = threadLeaks.isNotEmpty()
+            
+            if (leakingObjects.isNotEmpty() || hasThreadLeak) {
+                sb.appendLine("            <div class=\"leak-summary has-leak\" id=\"leak-summary\">")
+                sb.appendLine("                <div class=\"leak-summary-title\">")
+                sb.appendLine("                    <span class=\"icon\">🚨</span>")
+                if (leakingObjects.isNotEmpty() && hasThreadLeak) {
+                    sb.appendLine("                    <span>发现 ${leakingObjects.size} 个内存泄露对象和 ${threadLeaks.size} 种线程泄露</span>")
+                } else if (leakingObjects.isNotEmpty()) {
+                    sb.appendLine("                    <span>发现 ${leakingObjects.size} 个内存泄露对象</span>")
+                } else {
+                    sb.appendLine("                    <span>发现 ${threadLeaks.size} 种线程泄露</span>")
                 }
+                sb.appendLine("                </div>")
+                sb.appendLine("                <div class=\"leak-summary-grid\">")
+                if (stats.leakedActivityCount > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Activity</div><div class=\"value\">${stats.leakedActivityCount}</div></div>")
+                if (stats.leakedFragmentCount > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Fragment</div><div class=\"value\">${stats.leakedFragmentCount}</div></div>")
+                if (stats.leakedServiceCount > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Service</div><div class=\"value\">${stats.leakedServiceCount}</div></div>")
+                if (stats.leakedDialogCount > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Dialog</div><div class=\"value\">${stats.leakedDialogCount}</div></div>")
+                if (stats.leakedBroadcastReceiverCount > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">BroadcastReceiver</div><div class=\"value\">${stats.leakedBroadcastReceiverCount}</div></div>")
+                if (stats.leakedAnimatorCount > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Animator</div><div class=\"value\">${stats.leakedAnimatorCount}</div></div>")
+                if (hasThreadLeak) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">线程泄露</div><div class=\"value\">${threadLeaks.size} 种</div></div>")
+                sb.appendLine("                </div>")
                 sb.appendLine("            </div>")
-
-                // 显示同名线程详情
-                if (frequentThreads.isNotEmpty()) {
-                    sb.appendLine("            <div style=\"margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 6px;\">")
-                    sb.appendLine("                <div style=\"font-weight: 600; margin-bottom: 10px; color: #333;\">同名线程详情:</div>")
-                    frequentThreads.forEach { (name, count) ->
-                        sb.appendLine("                <div style=\"padding: 5px 0; font-size: 13px;\">")
-                        sb.appendLine("                    <span style=\"color: #666;\">$name:</span> <span style=\"font-weight: 600; color: #ff9800;\">$count 个</span>")
-                        sb.appendLine("                </div>")
-                    }
-                    sb.appendLine("            </div>")
-                }
-
-                sb.appendLine("        </div>")
-            }
-
-            // 检测到的应用包
-            if (stats.detectedPackages.isNotEmpty()) {
-                sb.appendLine("        <div class=\"section\">")
-                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📦</span>检测到的应用包</div>")
-                sb.appendLine("            <div class=\"package-list\">")
-                stats.detectedPackages.forEach {
-                    sb.appendLine("                <span class=\"package-tag\">$it</span>")
-                }
+            } else {
+                sb.appendLine("            <div class=\"leak-summary no-leak\">")
+                sb.appendLine("                <div class=\"leak-summary-title\">")
+                sb.appendLine("                    <span class=\"icon\">✅</span>")
+                sb.appendLine("                    <span>未发现内存泄露</span>")
+                sb.appendLine("                </div>")
                 sb.appendLine("            </div>")
-                sb.appendLine("        </div>")
             }
-
-            // Bitmap统计 (简要，详细在bitmap_analysis.html)
-            sb.appendLine("        <div class=\"section\">")
-            sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🖼️</span>Bitmap 统计</div>")
-            sb.appendLine("            <div class=\"stats-grid\">")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Bitmap数量</div><div class=\"value\">${stats.bitmapCount}</div></div>")
-            sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">大Bitmap(>1M像素)</div><div class=\"value\">${stats.largeBitmapCount}</div></div>")
-            sb.appendLine("            </div>")
-            // 显示Bitmap详细分析链接
-            sb.appendLine("            <div class=\"info-box\">")
-            sb.appendLine("                <div class=\"title\">📁 Bitmap详细分析</div>")
-            sb.appendLine("                <div>查看 <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a> 获取完整的Bitmap分析报告</div>")
-            if (bitmapOutputDir != null) {
-                sb.appendLine("                <div style=\"margin-top: 5px; font-size: 12px; color: #666;\">Bitmap图片目录: ${bitmapOutputDir.fileName}/</div>")
+            
+            sb.appendLine("        </div>")
+            
+            // 快速导航栏
+            sb.appendLine("        <div class=\"nav-bar\">")
+            sb.appendLine("            <div class=\"nav-links\">")
+            if (leakingObjects.isNotEmpty()) {
+                sb.appendLine("                <a href=\"#leak-summary\" class=\"nav-link\">泄露摘要</a>")
+                sb.appendLine("                <a href=\"#leak-types\" class=\"nav-link\">泄露类型</a>")
+                sb.appendLine("                <a href=\"#leak-objects\" class=\"nav-link\">泄露对象</a>")
+                if (largeObjects.isNotEmpty()) sb.appendLine("                <a href=\"#large-objects\" class=\"nav-link\">大对象</a>")
             }
+            if (stats.threadCount > 0) sb.appendLine("                <a href=\"#thread-stats\" class=\"nav-link\">线程统计</a>")
+            sb.appendLine("                <a href=\"#bitmap-stats\" class=\"nav-link\">Bitmap统计</a>")
+            sb.appendLine("                <a href=\"#statistics\" class=\"nav-link\">其他统计</a>")
             sb.appendLine("            </div>")
             sb.appendLine("        </div>")
 
-            // 泄露类型统计
+            // ========== 泄露相关section（优先显示） ==========
+            
+            // 1. 泄露类型统计
             if (stats.leakedActivityCount > 0 || stats.leakedFragmentCount > 0 || 
                 stats.leakedServiceCount > 0 ||
                 stats.leakedDialogCount > 0 ||
                 stats.leakedBroadcastReceiverCount > 0 ||
                 stats.leakedAnimatorCount > 0) {
-                sb.appendLine("        <div class=\"section\">")
+                sb.appendLine("        <div class=\"section leak-section\" id=\"leak-types\">")
                 sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🚨</span>泄露类型统计</div>")
                 sb.appendLine("            <div class=\"stats-grid\">")
                 if (stats.leakedActivityCount > 0) sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">Activity泄露</div><div class=\"value\">${stats.leakedActivityCount}</div></div>")
@@ -2037,70 +2051,19 @@ class HprofAnalyzer {
                 sb.appendLine("        </div>")
             }
 
-            // 类实例统计
-            if (classStatistics.isNotEmpty()) {
-                sb.appendLine("        <div class=\"section\">")
-                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📈</span>类实例统计 (关键类)</div>")
-                sb.appendLine("            <table class=\"data-table\">")
-                sb.appendLine("                <thead>")
-                sb.appendLine("                    <tr>")
-                sb.appendLine("                        <th>类名</th>")
-                sb.appendLine("                        <th>总实例数</th>")
-                sb.appendLine("                        <th>泄露实例数</th>")
-                sb.appendLine("                    </tr>")
-                sb.appendLine("                </thead>")
-                sb.appendLine("                <tbody>")
-                classStatistics.filter { it.leakInstanceCount > 0 || it.instanceCount > 10 }
-                    .take(20)
-                    .forEach { stat ->
-                        sb.appendLine("                    <tr>")
-                        sb.appendLine("                        <td>${escapeHtml(stat.className)}</td>")
-                        sb.appendLine("                        <td>${stat.instanceCount}</td>")
-                        sb.appendLine("                        <td><span style=\"color: ${if (stat.leakInstanceCount > 0) "#c62828" else "#666"}\">${stat.leakInstanceCount}</span></td>")
-                        sb.appendLine("                    </tr>")
-                    }
-                sb.appendLine("                </tbody>")
-                sb.appendLine("            </table>")
-                sb.appendLine("        </div>")
-            }
-
-            // 大对象列表
-            if (largeObjects.isNotEmpty()) {
-                sb.appendLine("        <div class=\"section\">")
-                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📦</span>大对象列表 (${largeObjects.size} 个)</div>")
-                sb.appendLine("            <table class=\"data-table\">")
-                sb.appendLine("                <thead>")
-                sb.appendLine("                    <tr>")
-                sb.appendLine("                        <th>类名</th>")
-                sb.appendLine("                        <th>大小</th>")
-                sb.appendLine("                        <th>详情</th>")
-                sb.appendLine("                    </tr>")
-                sb.appendLine("                </thead>")
-                sb.appendLine("                <tbody>")
-                largeObjects.sortedByDescending { it.size }.take(20).forEach { obj ->
-                    sb.appendLine("                    <tr>")
-                    sb.appendLine("                        <td>${escapeHtml(obj.className)}</td>")
-                    sb.appendLine("                        <td>${stats.formatSize(obj.size)}</td>")
-                    sb.appendLine("                        <td>${obj.extDetail ?: "-"}</td>")
-                    sb.appendLine("                    </tr>")
-                }
-                sb.appendLine("                </tbody>")
-                sb.appendLine("            </table>")
-                sb.appendLine("        </div>")
-            }
-
-            // 泄漏对象
+            // 2. 内存泄露对象（核心内容）
             if (leakingObjects.isNotEmpty()) {
-                sb.appendLine("        <div class=\"section\">")
+                sb.appendLine("        <div class=\"section leak-section\" id=\"leak-objects\">")
                 sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🚨</span>内存泄露对象 (${leakingObjects.size})</div>")
 
                 val byType = leakingObjects.groupBy { obj ->
                     // 优先使用 leakReason 判断类型，更准确
+                    // 注意：检查顺序很重要，Service 要在 Activity 之前，因为 "ActivityThread" 包含 "Activity"
                     when {
                         obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "receiver"
+                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "service"
                         obj.leakReason.contains("Activity", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "activity"
                         obj.leakReason.contains("Fragment", ignoreCase = true) -> "fragment"
-                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "service"
                         obj.leakReason.contains("Dialog", ignoreCase = true) -> "dialog"
                         obj.leakReason.contains("Handler") || obj.leakReason.contains("Message", ignoreCase = true) -> "handler"
                         obj.leakReason.contains("Animator", ignoreCase = true) -> "animator"
@@ -2109,9 +2072,9 @@ class HprofAnalyzer {
                         obj.leakReason.contains("View", ignoreCase = true) && !obj.leakReason.contains("ViewGroup", ignoreCase = true) -> "view"
                         // 如果 leakReason 无法判断，回退到类名判断
                         obj.className.contains("BroadcastReceiver") -> "receiver"
+                        obj.className.contains("Service") -> "service"
                         obj.className.contains("Activity") -> "activity"
                         obj.className.contains("Fragment") -> "fragment"
-                        obj.className.contains("Service") -> "service"
                         obj.className.contains("Dialog") -> "dialog"
                         obj.className.contains("Message") -> "handler"
                         obj.className.contains("Animator") -> "animator"
@@ -2251,9 +2214,34 @@ class HprofAnalyzer {
                 sb.appendLine("        </div>")
             }
 
-            // 显示大对象统计（始终显示，如果有大对象的话）
+            // 3. 大对象列表
+            if (largeObjects.isNotEmpty()) {
+                sb.appendLine("        <div class=\"section leak-section\" id=\"large-objects\">")
+                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📦</span>大对象列表 (${largeObjects.size} 个)</div>")
+                sb.appendLine("            <table class=\"data-table\">")
+                sb.appendLine("                <thead>")
+                sb.appendLine("                    <tr>")
+                sb.appendLine("                        <th>类名</th>")
+                sb.appendLine("                        <th>大小</th>")
+                sb.appendLine("                        <th>详情</th>")
+                sb.appendLine("                    </tr>")
+                sb.appendLine("                </thead>")
+                sb.appendLine("                <tbody>")
+                largeObjects.sortedByDescending { it.size }.take(20).forEach { obj ->
+                    sb.appendLine("                    <tr>")
+                    sb.appendLine("                        <td>${escapeHtml(obj.className)}</td>")
+                    sb.appendLine("                        <td>${stats.formatSize(obj.size)}</td>")
+                    sb.appendLine("                        <td>${obj.extDetail ?: "-"}</td>")
+                    sb.appendLine("                    </tr>")
+                }
+                sb.appendLine("                </tbody>")
+                sb.appendLine("            </table>")
+                sb.appendLine("        </div>")
+            }
+
+            // 4. 大对象统计
             if (stats.leakedBitmapCount > 0 || stats.leakedByteArrayCount > 0) {
-                sb.appendLine("        <div class=\"section\">")
+                sb.appendLine("        <div class=\"section leak-section\">")
                 sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📊</span>大对象统计</div>")
                 sb.appendLine("            <div class=\"stats-grid\">")
                 if (stats.leakedBitmapCount > 0) {
@@ -2272,8 +2260,92 @@ class HprofAnalyzer {
                 sb.appendLine("        </div>")
             }
 
+            // 5. 线程统计（可折叠，默认展开）
+            if (stats.threadCount > 0) {
+                sb.appendLine("        <div class=\"section\" id=\"thread-stats\">")
+                sb.appendLine("            <div class=\"section-title collapsible\" onclick=\"toggleSection(this)\">")
+                sb.appendLine("                <span class=\"icon\">🧵</span>线程统计")
+                sb.appendLine("            </div>")
+                sb.appendLine("            <div class=\"collapsible-content\">")
+                sb.appendLine("                <div class=\"stats-grid\">")
+                sb.appendLine("                    <div class=\"stat-card\"><div class=\"label\">总线程数</div><div class=\"value\">${stats.threadCount}</div></div>")
+
+                // 同名线程数量较多的
+                val frequentThreads = stats.threadNameCount.filter { it.value > 5 }
+                    .entries.sortedByDescending { it.value }
+                if (frequentThreads.isNotEmpty()) {
+                    sb.appendLine("                    <div class=\"stat-card\"><div class=\"label\">同名线程(>5)</div><div class=\"value\">${frequentThreads.size} 种</div></div>")
+                }
+                sb.appendLine("                </div>")
+
+                // 显示所有线程名列表
+                val allThreads = stats.threadNameCount.entries.sortedByDescending { it.value }
+                if (allThreads.isNotEmpty()) {
+                    sb.appendLine("                <div style=\"margin-top: 15px;\">")
+                    sb.appendLine("                    <div style=\"font-weight: 600; margin-bottom: 10px; color: #333;\">所有线程列表:</div>")
+                    sb.appendLine("                    <div class=\"package-list\">")
+                    allThreads.forEach { (name, count) ->
+                        val isFrequent = count > 5
+                        val tagStyle = if (isFrequent) {
+                            "background: #fff3e0; color: #ff9800; border: 1px solid #ff9800;"
+                        } else {
+                            "background: #e3f2fd; color: #1976d2;"
+                        }
+                        val displayText = if (count > 1) {
+                            "${escapeHtml(name)} ($count)"
+                        } else {
+                            escapeHtml(name)
+                        }
+                        sb.appendLine("                        <span class=\"package-tag\" style=\"$tagStyle\">$displayText</span>")
+                    }
+                    sb.appendLine("                    </div>")
+                    sb.appendLine("                </div>")
+                }
+
+                // 显示同名线程详情
+                if (frequentThreads.isNotEmpty()) {
+                    sb.appendLine("                <div style=\"margin-top: 15px; padding: 15px; background: #fff3e0; border-radius: 6px; border-left: 4px solid #ff9800;\">")
+                    sb.appendLine("                    <div style=\"font-weight: 600; margin-bottom: 10px; color: #333;\">⚠️ 同名线程警告 (>5个，可能存在线程泄露):</div>")
+                    frequentThreads.forEach { (name, count) ->
+                        sb.appendLine("                    <div style=\"padding: 5px 0; font-size: 13px;\">")
+                        sb.appendLine("                        <span style=\"color: #666;\">$name:</span> <span style=\"font-weight: 600; color: #ff9800;\">$count 个</span>")
+                        sb.appendLine("                    </div>")
+                    }
+                    if (frequentThreads.size >= 2) {
+                        val avgCount = frequentThreads.map { it.value }.average().toInt()
+                        sb.appendLine("                    <div style=\"margin-top: 10px; padding-top: 10px; border-top: 1px solid #ffcc80; font-size: 13px; color: #666;\">")
+                        sb.appendLine("                        多组重复线程: <span style=\"font-weight: 600; color: #ff9800;\">${frequentThreads.size}种</span> x <span style=\"font-weight: 600; color: #ff9800;\">$avgCount</span> (平均)")
+                        sb.appendLine("                    </div>")
+                    }
+                    sb.appendLine("                </div>")
+                }
+
+                sb.appendLine("            </div>")
+                sb.appendLine("        </div>")
+            }
+
+            // 6. Bitmap统计（可折叠，默认展开）
+            sb.appendLine("        <div class=\"section\" id=\"bitmap-stats\">")
+            sb.appendLine("            <div class=\"section-title collapsible\" onclick=\"toggleSection(this)\">")
+            sb.appendLine("                <span class=\"icon\">🖼️</span>Bitmap 统计")
+            sb.appendLine("            </div>")
+            sb.appendLine("            <div class=\"collapsible-content\">")
+            sb.appendLine("                <div class=\"stats-grid\">")
+            sb.appendLine("                    <div class=\"stat-card\"><div class=\"label\">Bitmap数量</div><div class=\"value\">${stats.bitmapCount}</div></div>")
+            sb.appendLine("                    <div class=\"stat-card\"><div class=\"label\">大Bitmap(>1M像素)</div><div class=\"value\">${stats.largeBitmapCount}</div></div>")
+            sb.appendLine("                </div>")
+            sb.appendLine("                <div class=\"info-box\">")
+            sb.appendLine("                    <div class=\"title\">📁 Bitmap详细分析</div>")
+            sb.appendLine("                    <div>查看 <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a> 获取完整的Bitmap分析报告</div>")
+            if (bitmapOutputDir != null) {
+                sb.appendLine("                    <div style=\"margin-top: 5px; font-size: 12px; color: #666;\">Bitmap图片目录: ${bitmapOutputDir.fileName}/</div>")
+            }
+            sb.appendLine("                </div>")
+            sb.appendLine("            </div>")
+            sb.appendLine("        </div>")
+
+            // 7. 无泄露提示
             if (leakingObjects.isEmpty()) {
-                // 无泄露时显示更友好的界面
                 sb.appendLine("        <div class=\"section\">")
                 sb.appendLine("            <div class=\"no-leak\">")
                 sb.appendLine("                <div class=\"icon\">✅</div>")
@@ -2290,7 +2362,128 @@ class HprofAnalyzer {
                 sb.appendLine("        </div>")
             }
 
+            // ========== 统计信息section（可折叠） ==========
+            sb.appendLine("        <div class=\"section\" id=\"statistics\">")
+            sb.appendLine("            <div class=\"section-title collapsible collapsed\" onclick=\"toggleSection(this)\">")
+            sb.appendLine("                <span class=\"icon\">📊</span>统计信息")
+            sb.appendLine("            </div>")
+            sb.appendLine("            <div class=\"collapsible-content collapsed\">")
+            
+            // 对象统计
+            sb.appendLine("                <div class=\"section\" style=\"padding: 15px 0; border-bottom: 1px solid #eee;\">")
+            sb.appendLine("                    <div class=\"section-title\" style=\"font-size: 16px; margin-bottom: 15px;\"><span class=\"icon\">📊</span>对象统计</div>")
+            sb.appendLine("                    <div class=\"stats-grid\">")
+            sb.appendLine("                        <div class=\"stat-card\"><div class=\"label\">总类数</div><div class=\"value\">${"%,d".format(stats.totalClassCount)}</div></div>")
+            sb.appendLine("                        <div class=\"stat-card\"><div class=\"label\">总实例数</div><div class=\"value\">${"%,d".format(stats.totalInstanceCount)}</div></div>")
+            sb.appendLine("                        <div class=\"stat-card\"><div class=\"label\">对象数组</div><div class=\"value\">${"%,d".format(stats.objectArrayCount)}</div></div>")
+            sb.appendLine("                        <div class=\"stat-card\"><div class=\"label\">基本类型数组</div><div class=\"value\">${"%,d".format(stats.primitiveArrayCount)}</div></div>")
+            sb.appendLine("                    </div>")
+            sb.appendLine("                </div>")
+
+            // 按包分类
+            sb.appendLine("                <div class=\"section\" style=\"padding: 15px 0; border-bottom: 1px solid #eee;\">")
+            sb.appendLine("                    <div class=\"section-title\" style=\"font-size: 16px; margin-bottom: 15px;\"><span class=\"icon\">📱</span>按包分类</div>")
+            sb.appendLine("                    <div class=\"stats-grid\">")
+            sb.appendLine("                        <div class=\"stat-card\"><div class=\"label\">Android</div><div class=\"value\">${"%,d".format(stats.androidCount)}</div></div>")
+            sb.appendLine("                        <div class=\"stat-card\"><div class=\"label\">AndroidX</div><div class=\"value\">${"%,d".format(stats.androidxCount)}</div></div>")
+            sb.appendLine("                        <div class=\"stat-card\"><div class=\"label\">Java</div><div class=\"value\">${"%,d".format(stats.javaCount)}</div></div>")
+            sb.appendLine("                        <div class=\"stat-card\"><div class=\"label\">Kotlin</div><div class=\"value\">${"%,d".format(stats.kotlinCount)}</div></div>")
+            sb.appendLine("                        <div class=\"stat-card\"><div class=\"label\">应用类</div><div class=\"value\">${"%,d".format(stats.appClassCount)}</div></div>")
+            sb.appendLine("                    </div>")
+            sb.appendLine("                </div>")
+
+            // 检测到的应用包
+            if (stats.detectedPackages.isNotEmpty()) {
+                sb.appendLine("                <div class=\"section\" style=\"padding: 15px 0; border-bottom: 1px solid #eee;\">")
+                sb.appendLine("                    <div class=\"section-title\" style=\"font-size: 16px; margin-bottom: 15px;\"><span class=\"icon\">📦</span>检测到的应用包</div>")
+                sb.appendLine("                    <div class=\"package-list\">")
+                stats.detectedPackages.forEach {
+                    sb.appendLine("                        <span class=\"package-tag\">$it</span>")
+                }
+                sb.appendLine("                    </div>")
+                sb.appendLine("                </div>")
+            }
+
+            // 类实例统计
+            if (classStatistics.isNotEmpty()) {
+                sb.appendLine("                <div class=\"section\" style=\"padding: 15px 0;\">")
+                sb.appendLine("                    <div class=\"section-title\" style=\"font-size: 16px; margin-bottom: 15px;\"><span class=\"icon\">📈</span>类实例统计 (关键类)</div>")
+                sb.appendLine("                    <table class=\"data-table\">")
+                sb.appendLine("                        <thead>")
+                sb.appendLine("                            <tr>")
+                sb.appendLine("                                <th>类名</th>")
+                sb.appendLine("                                <th>总实例数</th>")
+                sb.appendLine("                                <th>泄露实例数</th>")
+                sb.appendLine("                            </tr>")
+                sb.appendLine("                        </thead>")
+                sb.appendLine("                        <tbody>")
+                classStatistics.filter { it.leakInstanceCount > 0 || it.instanceCount > 10 }
+                    .take(20)
+                    .forEach { stat ->
+                        sb.appendLine("                            <tr>")
+                        sb.appendLine("                                <td>${escapeHtml(stat.className)}</td>")
+                        sb.appendLine("                                <td>${stat.instanceCount}</td>")
+                        sb.appendLine("                                <td><span style=\"color: ${if (stat.leakInstanceCount > 0) "#c62828" else "#666"}\">${stat.leakInstanceCount}</span></td>")
+                        sb.appendLine("                            </tr>")
+                    }
+                sb.appendLine("                        </tbody>")
+                sb.appendLine("                    </table>")
+                sb.appendLine("                </div>")
+            }
+            
+            sb.appendLine("            </div>")
+            sb.appendLine("        </div>")
+
             sb.appendLine("    </div>")
+            sb.appendLine("    <script>")
+            sb.appendLine("        // 折叠/展开功能")
+            sb.appendLine("        function toggleSection(element) {")
+            sb.appendLine("            const content = element.nextElementSibling;")
+            sb.appendLine("            if (content && content.classList.contains('collapsible-content')) {")
+            sb.appendLine("                element.classList.toggle('collapsed');")
+            sb.appendLine("                content.classList.toggle('collapsed');")
+            sb.appendLine("            }")
+            sb.appendLine("        }")
+            sb.appendLine("")
+            sb.appendLine("        // 平滑滚动到锚点")
+            sb.appendLine("        document.querySelectorAll('.nav-link').forEach(link => {")
+            sb.appendLine("            link.addEventListener('click', function(e) {")
+            sb.appendLine("                e.preventDefault();")
+            sb.appendLine("                const targetId = this.getAttribute('href').substring(1);")
+            sb.appendLine("                const targetElement = document.getElementById(targetId);")
+            sb.appendLine("                if (targetElement) {")
+            sb.appendLine("                    const navBarHeight = document.querySelector('.nav-bar').offsetHeight;")
+            sb.appendLine("                    const targetPosition = targetElement.offsetTop - navBarHeight - 20;")
+            sb.appendLine("                    window.scrollTo({")
+            sb.appendLine("                        top: targetPosition,")
+            sb.appendLine("                        behavior: 'smooth'")
+            sb.appendLine("                    });")
+            sb.appendLine("                    // 更新活动链接")
+            sb.appendLine("                    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));")
+            sb.appendLine("                    this.classList.add('active');")
+            sb.appendLine("                }")
+            sb.appendLine("            });")
+            sb.appendLine("        });")
+            sb.appendLine("")
+            sb.appendLine("        // 滚动时高亮导航链接")
+            sb.appendLine("        window.addEventListener('scroll', function() {")
+            sb.appendLine("            const sections = document.querySelectorAll('.section[id]');")
+            sb.appendLine("            const navLinks = document.querySelectorAll('.nav-link');")
+            sb.appendLine("            const scrollPos = window.scrollY + document.querySelector('.nav-bar').offsetHeight + 100;")
+            sb.appendLine("")
+            sb.appendLine("            sections.forEach((section, index) => {")
+            sb.appendLine("                const sectionTop = section.offsetTop;")
+            sb.appendLine("                const sectionHeight = section.offsetHeight;")
+            sb.appendLine("                if (scrollPos >= sectionTop && scrollPos < sectionTop + sectionHeight) {")
+            sb.appendLine("                    navLinks.forEach(link => link.classList.remove('active'));")
+            sb.appendLine("                    const matchingLink = Array.from(navLinks).find(link => link.getAttribute('href') === '#' + section.id);")
+            sb.appendLine("                    if (matchingLink) {")
+            sb.appendLine("                        matchingLink.classList.add('active');")
+            sb.appendLine("                    }")
+            sb.appendLine("                }")
+            sb.appendLine("            });")
+            sb.appendLine("        });")
+            sb.appendLine("    </script>")
             sb.appendLine("</body>")
             sb.appendLine("</html>")
 

@@ -1,0 +1,2 @@
+# jar文件应该包含在发布包中，但开发时可以从.gitignore中移除此行以提交jar文件
+# mem-monitor-1.0.0-all.jar

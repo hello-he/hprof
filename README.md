@@ -55,6 +55,10 @@ mem-monitor/
 │   ├── monkey_test.sh             # Monkey测试脚本
 │   ├── watch_test.sh              # Watch监控脚本
 │   └── run_test.sh                # 综合测试脚本
+├── right-click-menu/              # 右键菜单快捷方式
+│   ├── mem-monitor-analyze.sh     # 分析脚本
+│   ├── install.sh                 # 安装脚本
+│   └── README.md                  # 安装说明
 ├── build/libs/
 │   └── mem-monitor-1.0.0-all.jar # 可执行JAR
 └── README.md
@@ -86,6 +90,20 @@ java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof --large-onl
 # 指定输出目录
 java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof -o ./reports
 ```
+
+### 3. 安装右键菜单快捷方式（可选）
+
+在Linux桌面环境中，可以安装右键菜单快捷方式，方便直接分析hprof文件：
+
+```bash
+cd right-click-menu
+chmod +x install.sh
+./install.sh
+```
+
+安装后，在文件管理器中右键点击`.hprof`文件，选择"打开方式" → "分析内存泄露"即可。
+
+详细说明请查看 [right-click-menu/README.md](right-click-menu/README.md)
 
 ### 3. 实时监控应用
 

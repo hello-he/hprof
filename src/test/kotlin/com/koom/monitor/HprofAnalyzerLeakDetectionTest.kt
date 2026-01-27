@@ -140,38 +140,6 @@ class HprofAnalyzerLeakDetectionTest {
 
 
 
-    // ==================== Dialog 泄露检测测试 ====================
-
-    @Test
-    fun testDialogLeakDetection() {
-        val hprofFile = getHprofFile("dialog_leak.hprof")
-        if (hprofFile == null) {
-            println("⚠️  跳过测试: dialog_leak.hprof 不存在")
-            println("   生成方法: 运行 demo APK，点击'Dialog泄露'按钮，然后dump hprof")
-            return
-        }
-
-        val result = analyzeAndVerify(hprofFile)
-
-        // 验证 Dialog 泄露被检测到
-        assertTrue(
-            "应该检测到 Dialog 泄露",
-            result.stats.leakedDialogCount > 0
-        )
-
-        // 验证泄露对象列表包含 Dialog
-        val dialogLeaks = result.leakingObjects.filter { 
-            it.className.contains("Dialog") 
-        }
-        assertTrue(
-            "泄露对象列表应该包含 Dialog",
-            dialogLeaks.isNotEmpty()
-        )
-
-        println("✅ Dialog 泄露检测通过: 检测到 ${result.stats.leakedDialogCount} 个泄露")
-    }
-
-
     // ==================== BroadcastReceiver 泄露检测测试 ====================
 
     @Test
@@ -444,7 +412,6 @@ class HprofAnalyzerLeakDetectionTest {
         val leakTypeCounts = mapOf(
             "Activity" to result.stats.leakedActivityCount,
             "Fragment" to result.stats.leakedFragmentCount,
-            "Dialog" to result.stats.leakedDialogCount,
             "BroadcastReceiver" to result.stats.leakedBroadcastReceiverCount,
             "Animator" to result.stats.leakedAnimatorCount,
             "Bitmap" to result.stats.leakedBitmapCount,

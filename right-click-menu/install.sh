@@ -29,10 +29,13 @@ mkdir -p ~/.local/bin
 mkdir -p ~/.local/share/applications
 mkdir -p ~/.local/share/mime/packages
 
-# 复制脚本到 ~/.local/bin
+# 复制脚本和jar文件到 ~/.local/bin
 echo "安装分析脚本..."
 cp "$ANALYZE_SCRIPT" ~/.local/bin/mem-monitor-analyze.sh
 chmod +x ~/.local/bin/mem-monitor-analyze.sh
+
+echo "安装jar文件..."
+cp "$JAR_FILE" ~/.local/bin/mem-monitor-1.0.0-all.jar
 
 # 创建桌面文件
 echo "创建桌面快捷方式..."

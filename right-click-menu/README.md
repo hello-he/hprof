@@ -2,20 +2,22 @@
 
 此目录是一个**独立的发布包**，包含在Linux桌面环境中添加右键菜单快捷方式分析hprof文件所需的所有文件。
 
-## 文件说明
+## 支持的泄露检测
 
-- `mem-monitor-analyze.sh` - 分析脚本，用于执行hprof文件分析
-- `install.sh` - 安装脚本，用于安装右键菜单快捷方式
-- `mem-monitor-1.0.0-all.jar` - 可执行jar文件（**必须包含在发布包中**）
-- `README.md` - 本说明文件
+本工具可以检测以下类型的内存泄露问题：
 
-## 用户安装步骤
+- **Activity 泄露** - Activity 已销毁但仍被引用
+- **Fragment 泄露** - Fragment 生命周期已结束但仍被引用
+- **Service 泄露** - Service 未被 ActivityThread 持有但仍可达
+- **BroadcastReceiver 泄露** - BroadcastReceiver 未注销但仍被引用
+- **Animator 泄露** - 无限循环动画持有引用
+- **大 Bitmap 泄露** - 超过 1M 像素的 Bitmap 占用大量内存
+- **大 ByteArray 泄露** - 超过 1MB 的字节数组占用大量内存
+- **线程泄露** - 重复的线程名（同名线程超过 5 个）
 
-### 1. 确保jar文件存在
+## 快速开始
 
-此目录应该已经包含 `mem-monitor-1.0.0-all.jar` 文件。如果不存在，请联系发布者。
-
-### 2. 运行安装脚本
+### 1. 运行安装脚本
 
 ```bash
 cd right-click-menu
@@ -23,34 +25,13 @@ chmod +x install.sh
 ./install.sh
 ```
 
-安装脚本会：
-- 将分析脚本复制到 `~/.local/bin/`
-- 创建桌面快捷方式文件
-- 注册MIME类型
-- 更新桌面和MIME数据库
+安装脚本会自动完成以下操作：
+- 安装分析脚本到系统
+- 创建桌面快捷方式
+- 注册文件类型关联
+- 更新系统数据库
 
-## 开发者打包步骤
-
-如果你是开发者，需要创建发布包：
-
-```bash
-# 1. 构建项目
-cd /path/to/mem-monitor
-./gradlew shadowJar
-
-# 2. 打包右键菜单发布包
-./scripts/package-right-click-menu.sh
-```
-
-打包脚本会将jar文件复制到 `right-click-menu/` 目录，创建完整的独立发布包。
-
-安装脚本会：
-- 将分析脚本复制到 `~/.local/bin/`
-- 创建桌面快捷方式文件
-- 注册MIME类型
-- 更新桌面和MIME数据库
-
-## 使用方法
+### 2. 使用右键菜单
 
 安装完成后：
 
@@ -60,12 +41,24 @@ cd /path/to/mem-monitor
 
 分析完成后会自动打开HTML报告。
 
+## 报告位置
+
+分析报告会生成在hprof文件所在目录，格式为：
+```
+hprof文件所在目录/hprof文件名_时间戳/
+```
+
+例如：
+- 文件：`/home/user/heap.hprof`
+- 报告：`/home/user/heap_20260126_163045/hprof_analysis.html`
+
 ## 卸载
 
 删除以下文件即可卸载：
 
 ```bash
 rm ~/.local/bin/mem-monitor-analyze.sh
+rm ~/.local/bin/mem-monitor-1.0.0-all.jar
 rm ~/.local/share/applications/mem-monitor-analyze.desktop
 rm ~/.local/share/mime/packages/hprof.xml
 update-desktop-database ~/.local/share/applications
@@ -93,15 +86,7 @@ update-mime-database ~/.local/share/mime
 
 ### 找不到jar文件
 
-jar文件必须位于 `right-click-menu/mem-monitor-1.0.0-all.jar`。
-
-如果这是从源码获取的，请运行打包脚本：
-```bash
-cd /path/to/mem-monitor
-./scripts/package-right-click-menu.sh
-```
-
-如果这是发布包，请联系发布者获取包含jar文件的完整版本。
+确保此目录包含 `mem-monitor-1.0.0-all.jar` 文件。如果文件缺失，请联系发布者获取完整版本。
 
 ### 没有图形界面（zenity）
 
@@ -118,17 +103,6 @@ sudo dnf install zenity
 sudo pacman -S zenity
 ```
 
-## 报告位置
-
-分析报告会生成在hprof文件所在目录，格式为：
-```
-hprof文件所在目录/hprof文件名_时间戳/
-```
-
-例如：
-- 文件：`/home/user/heap.hprof`
-- 报告：`/home/user/heap_20260126_163045/hprof_analysis.html`
-
 ## 功能特性
 
 - ✅ 独立发布包，包含所有必需文件
@@ -136,11 +110,3 @@ hprof文件所在目录/hprof文件名_时间戳/
 - ✅ 自动生成报告到hprof文件所在目录
 - ✅ 分析完成后自动打开HTML报告
 - ✅ 错误提示和日志记录
-
-## 发布说明
-
-此目录是一个**完整的独立发布包**，用户只需要这个目录即可使用：
-
-1. 将整个 `right-click-menu` 目录分发给用户
-2. 用户运行 `./install.sh` 即可安装
-3. 无需其他依赖，jar文件已包含在目录中

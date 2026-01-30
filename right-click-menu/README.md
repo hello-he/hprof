@@ -9,7 +9,7 @@
 - **Activity 泄露** - Activity 已销毁但仍被引用
 - **Fragment 泄露** - Fragment 生命周期已结束但仍被引用
 - **Service 泄露** - Service 未被 ActivityThread 持有但仍可达
-- **Animator 泄露** - 无限循环动画持有引用
+- **Animator 泄露** - 正在运行中的动画持有引用（mRunning=true）
 - **大 Bitmap 泄露** - 超过 1M 像素的 Bitmap 占用大量内存
 - **大 ByteArray 泄露** - 超过 1MB 的字节数组占用大量内存
 - **线程泄露** - 重复的线程名（同名线程超过 5 个）

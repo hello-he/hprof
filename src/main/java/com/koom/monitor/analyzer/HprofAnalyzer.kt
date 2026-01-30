@@ -62,8 +62,14 @@ class HprofAnalyzer {
         private const val FRAGMENT_MANAGER_FIELD_NAME = "mFragmentManager"
         private const val FRAGMENT_MCALLED_FIELD_NAME = "mCalled"
 
+        // androidx.lifecycle.Lifecycle.State 枚举 ordinal（声明顺序即 ordinal，与 android.app.Fragment.mState 不同）
+        // 源码声明顺序：DESTROYED, INITIALIZED, CREATED, STARTED, RESUMED → DESTROYED=0, INITIALIZED=1, CREATED=2, STARTED=3, RESUMED=4
+        // 源码：https://github.com/androidx/androidx/blob/androidx-main/lifecycle/lifecycle-common/src/commonMain/kotlin/androidx/lifecycle/Lifecycle.kt
+        private const val LIFECYCLE_STATE_DESTROYED = 0
+        // android.app.Fragment.mState: INVALID_STATE=-1, INITIALIZING=0, CREATED=1, ACTIVITY_CREATED=2, STOPPED=3, STARTED=4, RESUMED=5
+
         // 阈值
-        private const val SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD = 45
+        private const val SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD = 100  // 同一类最多分析的泄露实例数
         private const val DEFAULT_BIG_PRIMITIVE_ARRAY = 256 * 1024  // 256KB
         private const val DEFAULT_BIG_OBJECT_ARRAY = 256 * 1024  // 256KB
     }
@@ -245,19 +251,28 @@ class HprofAnalyzer {
                             
                             var isLeaked = false
                             
-                            // 优先检查AndroidX Fragment的mLifecycleRegistry.state
+                            // 优先检查 AndroidX Fragment 的 mLifecycleRegistry.mState（androidx.lifecycle.Lifecycle.State，非 android.app.Fragment.mState）
                             val mLifecycleRegistry = instance[fragmentClass!!.name, "mLifecycleRegistry"]?.value?.asObject?.asInstance
                             if (mLifecycleRegistry != null) {
-                                // androidx.lifecycle.LifecycleRegistry 有 mState 字段（Lifecycle.State枚举）
-                                // DESTROYED 通常是枚举值 5
+                                // LifecycleRegistry.mState 为 Lifecycle.State 枚举 ordinal（声明顺序）：DESTROYED=0, INITIALIZED=1, CREATED=2, STARTED=3, RESUMED=4
                                 val mState = mLifecycleRegistry[LIFECYCLE_REGISTRY_CLASS_NAME, "mState"]?.value?.asInt
-                                if (mState == 5) { // Lifecycle.State.DESTROYED
+                                if (mState == LIFECYCLE_STATE_DESTROYED) {
                                     isLeaked = true
                                     logger.debug("发现泄漏Fragment: ${instance.instanceClassName} (mLifecycleRegistry.state == DESTROYED)")
                                 }
+                                // 与 LeakCanary/AS Profiler 对齐：mFragmentManager==null 表示已从 Manager 脱离，仍可达即泄露。
+                                // 此时 LifecycleRegistry.mState 往往非 DESTROYED(0)，因被 NetworkCallback 等持有时未走 onDestroy()（见下方日志 mState）。
+                                if (!isLeaked) {
+                                    val fragmentManager = instance[fragmentClass.name, FRAGMENT_MANAGER_FIELD_NAME]
+                                    if (fragmentManager?.value?.asObject == null) {
+                                        isLeaked = true
+                                        val mStateWhenDetached = mLifecycleRegistry[LIFECYCLE_REGISTRY_CLASS_NAME, "mState"]?.value?.asInt
+                                        logger.debug("发现泄漏Fragment: ${instance.instanceClassName} (mFragmentManager == null, mState=$mStateWhenDetached, still reachable)")
+                                    }
+                                }
                             } else {
-                                // 回退到旧方法：检查mFragmentManager == null（适用于android.app.Fragment）
-                                // 参考LeakCanary：只要mFragmentManager == null就认为是泄露
+                                // 回退到旧方法（适用于 android.app.Fragment，其 mState：INVALID=-1, INITIALIZING=0, CREATED=1, ACTIVITY_CREATED=2, STOPPED=3, STARTED=4, RESUMED=5）
+                                // 参考 LeakCanary：mFragmentManager == null 即视为已脱离 Manager，仍可达即泄露；不依赖 Fragment.mState
                                 val fragmentManager = instance[fragmentClass.name, FRAGMENT_MANAGER_FIELD_NAME]
                                 val isNullManager = fragmentManager?.value?.asObject == null
                                 
@@ -346,28 +361,21 @@ class HprofAnalyzer {
                             continue
                         }
 
-                        // 检查Animator泄露（参考LeakCanary：检查mStarted、mRunning、mRepeatCount）
+                        // 检查Animator泄露（参考LeakCanary：只有正在运行中的 Animator 才算泄露）
                         val isObjectAnimator = isObjectAnimator(objectAnimatorClass, instance)
                         val isValueAnimator = isValueAnimator(valueAnimatorClass, instance)
                         if (isObjectAnimator || isValueAnimator) {
-                            // 参考LeakCanary：检查mStarted、mRunning、mRepeatCount
-                            val mStarted = instance[ANIMATOR_CLASS_NAME, "mStarted"]?.value?.asBoolean == true
+                            // 参考LeakCanary：检查mRunning状态
                             val mRunning = instance[ANIMATOR_CLASS_NAME, "mRunning"]?.value?.asBoolean == true
-                            val mRepeatCount = instance[VALUE_ANIMATOR_CLASS_NAME, "mRepeatCount"]?.value?.asInt
-                            // ValueAnimator.INFINITE = -1
-                            val isInfinite = mRepeatCount == -1
                             
-                            // LeakCanary特别关注无限循环动画的泄露
-                            // 如果Animator是无限循环的（mRepeatCount == -1），即使已经停止，也可能存在泄露
-                            // 放宽条件：只要mRepeatCount == -1就认为是泄露（无限循环动画即使停止也可能泄露）
-                            // 注意：如果Animator在dumpheap时已经停止，mRepeatCount可能被重置为0，所以无法检测
-                            // 但我们可以通过检查Animator是否被静态引用持有来判断（这需要在引用链分析中处理）
-                            if (isInfinite) {
+                            // LeakCanary标准：只有正在运行中的 Animator 才算泄露
+                            // 已停止的 Animator 即使被引用也不算泄露（会被正常回收）
+                            if (mRunning) {
                                 val objectCounter = updateClassCounter(instance.instanceClassId)
                                 if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
                                     leakingIds.add(instance.objectId)
                                     stats.leakedAnimatorCount++
-                                    logger.debug("发现泄漏Animator: ${instance.instanceClassName} (infinite animator, mRepeatCount=-1, mStarted=$mStarted, mRunning=$mRunning)")
+                                    logger.debug("发现泄漏Animator: ${instance.instanceClassName} (mRunning=true, still running)")
                                 }
                             }
                             continue
@@ -419,13 +427,16 @@ class HprofAnalyzer {
                 }
             }
 
-            // 收集类实例统计
+            // 收集类实例统计（根据实际有 GC Root 路径的泄露对象统计，而非 classCounters.leakCnt）
+            val actualLeakCountByClass = leakingObjects.groupBy { it.className }
+                .mapValues { (_, objects) -> objects.sumOf { it.instanceCount } }
             val classStatistics = classCounters.map { (classId, counter) ->
                 val heapClass = graph.findObjectById(classId).asClass
+                val className = heapClass?.name ?: "Unknown"
                 ClassStatistics(
-                    className = heapClass?.name ?: "Unknown",
+                    className = className,
                     instanceCount = counter.allCnt,
-                    leakInstanceCount = counter.leakCnt
+                    leakInstanceCount = actualLeakCountByClass[className] ?: 0
                 )
             }.sortedByDescending { it.leakInstanceCount }
 
@@ -645,17 +656,21 @@ class HprofAnalyzer {
             }
         }
 
-        // Fragment泄露（参考LeakCanary：检查mLifecycleRegistry.state == DESTROYED）
+        // Fragment泄露（参考LeakCanary：检查 mLifecycleRegistry.mState == DESTROYED(0) 或 mFragmentManager == null）
         if (fragmentClass != null && isFragment(fragmentClass, instance)) {
             val mLifecycleRegistry = instance[fragmentClass.name, "mLifecycleRegistry"]?.value?.asObject?.asInstance
             if (mLifecycleRegistry != null) {
                 val mState = mLifecycleRegistry[LIFECYCLE_REGISTRY_CLASS_NAME, "mState"]?.value?.asInt
-                if (mState == 5) { // Lifecycle.State.DESTROYED
+                if (mState == LIFECYCLE_STATE_DESTROYED) {
                     return "Fragment Leak: mLifecycleRegistry.state == DESTROYED but still reachable"
                 }
+                val fragmentManager = instance[fragmentClass.name, FRAGMENT_MANAGER_FIELD_NAME]
+                if (fragmentManager?.value?.asObject == null) {
+                    return "Fragment Leak: mFragmentManager == null but still reachable"
+                }
             } else {
-                // 回退到旧方法（适用于android.app.Fragment）
-                // 参考KOOM：mFragmentManager == null && mCalled == true（生命周期回调已完成）
+                // 回退到旧方法（适用于 android.app.Fragment，其 mState：INVALID=-1, INITIALIZING=0, CREATED=1, ACTIVITY_CREATED=2, STOPPED=3, STARTED=4, RESUMED=5）
+                // 参考 KOOM：mFragmentManager == null && mCalled == true（生命周期回调已完成），不依赖 Fragment.mState
                 val fragmentManager = instance[fragmentClass.name, FRAGMENT_MANAGER_FIELD_NAME]
                 val mCalled = instance[fragmentClass.name, FRAGMENT_MCALLED_FIELD_NAME]?.value?.asBoolean ?: false
                 if (fragmentManager?.value?.asObject == null) {
@@ -686,24 +701,14 @@ class HprofAnalyzer {
             }
         }
 
-        // Animator泄露
+        // Animator泄露（与检测逻辑一致：只有正在运行中的 Animator 才算泄露）
         if ((objectAnimatorClass != null && isObjectAnimator(objectAnimatorClass, instance)) ||
             (valueAnimatorClass != null && isValueAnimator(valueAnimatorClass, instance))) {
-            val mRepeatCount = instance[VALUE_ANIMATOR_CLASS_NAME, "mRepeatCount"]?.value?.asInt
-            // 与检测逻辑一致：只要mRepeatCount == -1就认为是泄露（无限循环动画）
-            // 即使Animator已经停止，如果被静态引用持有，也是泄露
-            if (mRepeatCount == -1) {
-                val mRunning = instance[ANIMATOR_CLASS_NAME, "mRunning"]?.value?.asBoolean == true
-                if (mRunning) {
-                    return "Animator Leak: infinite animator is running and holds reference"
-                } else {
-                    return "Animator Leak: infinite animator holds reference (stopped but still reachable)"
-                }
+            val mRunning = instance[ANIMATOR_CLASS_NAME, "mRunning"]?.value?.asBoolean == true
+            if (mRunning) {
+                return "Animator Leak: animator is still running"
             } else {
-                // 即使不是无限循环，如果Animator被静态引用持有，也可能是泄露
-                // 但为了减少误报，只对无限循环动画进行检测
-                // 这里返回更通用的原因
-                return "Animator Leak: animator holds reference"
+                return "Animator: stopped (not a leak)"
             }
         }
 
@@ -783,13 +788,14 @@ class HprofAnalyzer {
             }
         }
 
-        // 处理应用泄漏
+        // 处理应用泄漏（同一路径可能合并了多种泄露类，如 HomeFragment 与 HomeListFragment 同路径按 className 拆条显示）
         for (appLeak in heapAnalysis.applicationLeaks) {
-            if (appLeak.leakTraces.isNotEmpty()) {
-                val leakTrace = appLeak.leakTraces[0]
+            if (appLeak.leakTraces.isEmpty()) continue
+            val tracesByClass = appLeak.leakTraces.groupBy { it.leakingObject.className }
+            for ((className, traces) in tracesByClass) {
+                val leakTrace = traces[0]
                 val leakingObjectId = leakTrace.leakingObject.objectId
                 val leakingObject = leakTrace.leakingObject
-                
 
                 // 检查此泄露对象中包含的Bitmap
                 val bitmapInfo = bitmapMap[leakingObjectId]
@@ -803,77 +809,54 @@ class HprofAnalyzer {
                 // 检查此泄露对象是否是ByteArray
                 val isLeakingByteArray = leakingObject.className == "byte[]"
                 if (isLeakingByteArray) {
-                    // 检查ByteArray大小（需要从graph中获取）
                     val byteArrayObject = graph.findObjectById(leakingObjectId)
                     if (byteArrayObject is kshark.HeapObject.HeapPrimitiveArray) {
                         val record = byteArrayObject.readRecord()
                         if (record is kshark.HprofRecord.HeapDumpRecord.ObjectRecord.PrimitiveArrayDumpRecord.ByteArrayDump) {
                             val byteSize = record.size.toLong()
-                            // 只有>1MB的ByteArray才统计
-                            if (byteSize > 1_000_000) {
-                                stats.leakedByteArrayCount++
-                            }
+                            if (byteSize > 1_000_000) stats.leakedByteArrayCount++
                         }
                     }
                 }
 
-                // 先确定泄露原因，用于判断是否应该显示内部的Bitmap
                 val leakReason = determineLeakReason(
-                    graph, leakingObjectId, leakTrace.leakingObject.className,
+                    graph, leakingObjectId, className,
                     activityClass, fragmentClass, bitmapClass, serviceClass,
                     objectAnimatorClass, valueAnimatorClass
                 )
-                
-                // 对于某些类型的泄露（Service、Handler/Message、Animator），
-                // 不显示内部的Bitmap，因为泄露的根本原因不是Bitmap
                 val shouldSkipBitmap = leakReason.contains("Service", ignoreCase = true) ||
                         leakReason.contains("Handler", ignoreCase = true) ||
                         leakReason.contains("Message", ignoreCase = true) ||
                         leakReason.contains("Animator", ignoreCase = true)
 
                 val containedBitmaps = if (isLeakingBitmap) {
-                    // 如果泄露对象本身就是Bitmap，创建空列表（后面会手动添加所有实例）
                     mutableListOf()
                 } else if (shouldSkipBitmap) {
-                    // 对于上述类型的泄露，不显示内部的Bitmap
                     mutableListOf()
                 } else {
                     val heapObject = graph.findObjectById(leakingObjectId)
                     if (heapObject != null) {
                         findContainedBitmaps(heapObject, bitmapMap, existingBitmapFiles).toMutableList()
-                    } else {
-                        mutableListOf()
-                    }
+                    } else mutableListOf()
                 }
 
-                // 如果泄露对象本身就是Bitmap，且有多个相同泄露（instanceCount > 1）
-                // 需要为每个泄露的Bitmap实例添加条目
                 if (isLeakingBitmap) {
-                    // bitmapInfo 在这里不为 null（因为 isLeakingBitmap 检查了）
                     val baseInfo = bitmapInfo!!
-
-                    // 如果有多个相同泄露，显示所有实例
-                    if (appLeak.leakTraces.size > 1) {
-                        // 为每个leakTrace创建一个条目
-                        appLeak.leakTraces.take(10).forEach { trace ->
+                    if (traces.size > 1) {
+                        traces.take(10).forEach { trace ->
                             val objectId = trace.leakingObject.objectId
                             val info = bitmapMap[objectId] ?: baseInfo
-
-                            val path = findBitmapImageFile(objectId)
-                                ?: info.imageFilePath
-
                             containedBitmaps.add(
                                 ContainedBitmap(
                                     objectId = objectId,
                                     width = info.width,
                                     height = info.height,
                                     pixelCount = info.pixelCount,
-                                    imageFilePath = path
+                                    imageFilePath = findBitmapImageFile(objectId) ?: info.imageFilePath
                                 )
                             )
                         }
                     } else {
-                        // 只有一个泄露，显示一次
                         containedBitmaps.add(
                             0,
                             ContainedBitmap(
@@ -889,24 +872,26 @@ class HprofAnalyzer {
 
                 results.add(
                     LeakingObject(
-                        className = leakTrace.leakingObject.className,
+                        className = className,
                         objectId = leakingObjectId,
                         size = leakTrace.leakingObject.retainedHeapByteSize?.toLong() ?: 0,
                         leakReason = leakReason,
                         referenceChain = buildReferenceChain(leakTrace.referencePath),
                         gcRoot = leakTrace.gcRootType.description,
                         signature = appLeak.signature,
-                        instanceCount = appLeak.leakTraces.size,
+                        instanceCount = traces.size,
                         containedBitmaps = containedBitmaps
                     )
                 )
             }
         }
 
-        // 处理库泄漏
+        // 处理库泄漏（同一路径按 className 拆条显示，便于看到 HomeListFragment 等不同类）
         for (libLeak in heapAnalysis.libraryLeaks) {
-            if (libLeak.leakTraces.isNotEmpty()) {
-                val leakTrace = libLeak.leakTraces[0]
+            if (libLeak.leakTraces.isEmpty()) continue
+            val tracesByClass = libLeak.leakTraces.groupBy { it.leakingObject.className }
+            for ((className, traces) in tracesByClass) {
+                val leakTrace = traces[0]
                 val leakingObjectId = leakTrace.leakingObject.objectId
                 val leakingObject = leakTrace.leakingObject
 
@@ -931,15 +916,11 @@ class HprofAnalyzer {
                 val bitmapInfo = bitmapMap[leakingObjectId]
                 val isLeakingBitmap = bitmapInfo != null && bitmapInfo.pixelCount >= 100_000
 
-                // 先确定泄露原因，用于判断是否应该显示内部的Bitmap
                 val leakReason = determineLeakReason(
-                    graph, leakingObjectId, leakTrace.leakingObject.className,
+                    graph, leakingObjectId, className,
                     activityClass, fragmentClass, bitmapClass, serviceClass,
                     objectAnimatorClass, valueAnimatorClass
                 )
-                
-                // 对于某些类型的泄露（Service、Handler/Message、Animator），
-                // 不显示内部的Bitmap，因为泄露的根本原因不是Bitmap
                 val shouldSkipBitmap = leakReason.contains("Service", ignoreCase = true) ||
                         leakReason.contains("Handler", ignoreCase = true) ||
                         leakReason.contains("Message", ignoreCase = true) ||
@@ -948,38 +929,27 @@ class HprofAnalyzer {
                 val containedBitmaps = if (isLeakingBitmap) {
                     mutableListOf()
                 } else if (shouldSkipBitmap) {
-                    // 对于上述类型的泄露，不显示内部的Bitmap
                     mutableListOf()
                 } else {
                     val heapObject = graph.findObjectById(leakingObjectId)
                     if (heapObject != null) {
                         findContainedBitmaps(heapObject, bitmapMap, existingBitmapFiles).toMutableList()
-                    } else {
-                        mutableListOf()
-                    }
+                    } else mutableListOf()
                 }
 
-                // 如果泄露对象本身就是Bitmap，且有多个相同泄露（instanceCount > 1）
                 if (isLeakingBitmap) {
-                    // bitmapInfo 在这里不为 null（因为 isLeakingBitmap 检查了）
                     val baseInfo = bitmapInfo!!
-
-                    if (libLeak.leakTraces.size > 1) {
-                        // 为每个leakTrace创建一个条目
-                        libLeak.leakTraces.take(10).forEach { trace ->
+                    if (traces.size > 1) {
+                        traces.take(10).forEach { trace ->
                             val objectId = trace.leakingObject.objectId
                             val info = bitmapMap[objectId] ?: baseInfo
-
-                            val path = findBitmapImageFile(objectId)
-                                ?: info.imageFilePath
-
                             containedBitmaps.add(
                                 ContainedBitmap(
                                     objectId = objectId,
                                     width = info.width,
                                     height = info.height,
                                     pixelCount = info.pixelCount,
-                                    imageFilePath = path
+                                    imageFilePath = findBitmapImageFile(objectId) ?: info.imageFilePath
                                 )
                             )
                         }
@@ -999,19 +969,21 @@ class HprofAnalyzer {
 
                 results.add(
                     LeakingObject(
-                        className = leakTrace.leakingObject.className,
+                        className = className,
                         objectId = leakingObjectId,
                         size = leakTrace.leakingObject.retainedHeapByteSize?.toLong() ?: 0,
                         leakReason = "Library Leak: ${libLeak.description} ($leakReason)",
                         referenceChain = buildReferenceChain(leakTrace.referencePath),
                         gcRoot = leakTrace.gcRootType.description,
                         signature = libLeak.signature,
-                        instanceCount = libLeak.leakTraces.size,
+                        instanceCount = traces.size,
                         containedBitmaps = containedBitmaps
                     )
                 )
             }
         }
+
+        // 注意：unreachableObjects 不显示在泄露列表中，因为它们没有 GC Root 路径，可以被正常回收，不是真正的泄露
 
         return results
     }
@@ -1383,7 +1355,7 @@ class HprofAnalyzer {
         val filterInstanceTime: Long = 0,
         val findGCPathTime: Long = 0
     ) {
-        fun printReport() {
+        fun printReport(hasBitmapAnalysis: Boolean = false) {
             println()
             println("╔══════════════════════════════════════════════════════════════╗")
             println("║              Hprof 内存泄露分析报告 (仅泄露对象)                ║")
@@ -1454,18 +1426,22 @@ class HprofAnalyzer {
             println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             println("   Bitmap数量: ${stats.bitmapCount}")
             println("   大Bitmap(>1M像素): ${stats.largeBitmapCount}")
-            println("   (Bitmap详细分析请查看 bitmap_analysis.html)")
+            if (hasBitmapAnalysis) {
+                println("   (Bitmap详细分析请查看 bitmap_analysis.html)")
+            }
             println()
 
-            // 泄露类型统计
-            if (stats.leakedActivityCount > 0 || stats.leakedFragmentCount > 0 || 
-                stats.leakedAnimatorCount > 0) {
+            // 泄露类型统计（与类实例统计一致：按类汇总实际泄露实例数，不含同类 45 条上限）
+            val summaryActivity = classStatistics.filter { it.className.contains("Activity") && !it.className.contains("ActivityThread") }.sumOf { it.leakInstanceCount }
+            val summaryFragment = classStatistics.filter { it.className.contains("Fragment") && it.className != REPORT_FRAGMENT_CLASS_NAME }.sumOf { it.leakInstanceCount }
+            val summaryAnimator = classStatistics.filter { it.className.contains("Animator") }.sumOf { it.leakInstanceCount }
+            if (summaryActivity > 0 || summaryFragment > 0 || summaryAnimator > 0) {
                 println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 println("🚨 泄露类型统计")
                 println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                if (stats.leakedActivityCount > 0) println("   Activity泄露: ${stats.leakedActivityCount} 个")
-                if (stats.leakedFragmentCount > 0) println("   Fragment泄露: ${stats.leakedFragmentCount} 个")
-                if (stats.leakedAnimatorCount > 0) println("   Animator泄露: ${stats.leakedAnimatorCount} 个")
+                if (summaryActivity > 0) println("   Activity泄露: $summaryActivity 个")
+                if (summaryFragment > 0) println("   Fragment泄露: $summaryFragment 个")
+                if (summaryAnimator > 0) println("   Animator泄露: $summaryAnimator 个")
                 println()
             }
 
@@ -1501,8 +1477,10 @@ class HprofAnalyzer {
 
             if (leakingObjects.isNotEmpty()) {
                 println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                println("🚨 内存泄露对象 (${leakingObjects.size})")
+                println("🚨 内存泄露对象 (${leakingObjects.size} 条代表性路径)")
                 println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                println("   💡 以下为路径去重后的代表性泄露路径；同一路径多实例会标「相同泄露: N 个」。完整各类数量见上方「类实例统计」。")
+                println()
 
                 val byType = leakingObjects.groupBy { obj ->
                     when {
@@ -1568,7 +1546,9 @@ class HprofAnalyzer {
                 println("   - Activity/Fragment未销毁，不视为泄露")
                 println("   - 但大Bitmap/大ByteArray占用大量内存也值得关注")
                 println("   - 这些对象已在分析报告中标记为\"泄露\"")
-                println("   - (Bitmap详细分析请查看 bitmap_analysis.html)")
+                if (hasBitmapAnalysis) {
+                    println("   - (Bitmap详细分析请查看 bitmap_analysis.html)")
+                }
                 println()
             }
         }
@@ -1576,7 +1556,7 @@ class HprofAnalyzer {
         /**
          * 保存报告到文件
          */
-        fun saveReport(outputDir: Path): List<Path> {
+        fun saveReport(outputDir: Path, hasBitmapAnalysis: Boolean = false): List<Path> {
             val files = mutableListOf<Path>()
 
             // 创建输出目录
@@ -1584,18 +1564,18 @@ class HprofAnalyzer {
 
             // 写入文本报告（不带时间戳）
             val txtFile = outputDir.resolve("hprof_analysis.txt")
-            Files.writeString(txtFile, generateTextReport())
+            Files.writeString(txtFile, generateTextReport(hasBitmapAnalysis))
             files.add(txtFile)
 
             // 写入HTML报告（不带时间戳）
             val htmlFile = outputDir.resolve("hprof_analysis.html")
-            Files.writeString(htmlFile, generateHtmlReport(bitmapOutputDir))
+            Files.writeString(htmlFile, generateHtmlReport(bitmapOutputDir, hasBitmapAnalysis))
             files.add(htmlFile)
 
             return files
         }
 
-        private fun generateTextReport(): String {
+        private fun generateTextReport(hasBitmapAnalysis: Boolean = false): String {
             val sb = StringBuilder()
             sb.appendLine("\n╔══════════════════════════════════════════════════════════════╗")
             sb.appendLine("║              Hprof 内存泄露分析报告 (仅泄露对象)                ║")
@@ -1681,18 +1661,22 @@ class HprofAnalyzer {
             sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             sb.appendLine("   Bitmap数量: ${stats.bitmapCount}")
             sb.appendLine("   大Bitmap(>1M像素): ${stats.largeBitmapCount}")
-            sb.appendLine("   (Bitmap详细分析请查看 bitmap_analysis.html)")
+            if (hasBitmapAnalysis) {
+                sb.appendLine("   (Bitmap详细分析请查看 bitmap_analysis.html)")
+            }
             sb.appendLine()
 
-            // 泄露类型统计
-            if (stats.leakedActivityCount > 0 || stats.leakedFragmentCount > 0 || 
-                stats.leakedAnimatorCount > 0) {
+            // 泄露类型统计（与类实例统计一致：按类汇总实际泄露实例数，不含同类 45 条上限）
+            val summaryActivity = classStatistics.filter { it.className.contains("Activity") && !it.className.contains("ActivityThread") }.sumOf { it.leakInstanceCount }
+            val summaryFragment = classStatistics.filter { it.className.contains("Fragment") && it.className != REPORT_FRAGMENT_CLASS_NAME }.sumOf { it.leakInstanceCount }
+            val summaryAnimator = classStatistics.filter { it.className.contains("Animator") }.sumOf { it.leakInstanceCount }
+            if (summaryActivity > 0 || summaryFragment > 0 || summaryAnimator > 0) {
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 sb.appendLine("🚨 泄露类型统计")
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                if (stats.leakedActivityCount > 0) sb.appendLine("   Activity泄露: ${stats.leakedActivityCount} 个")
-                if (stats.leakedFragmentCount > 0) sb.appendLine("   Fragment泄露: ${stats.leakedFragmentCount} 个")
-                if (stats.leakedAnimatorCount > 0) sb.appendLine("   Animator泄露: ${stats.leakedAnimatorCount} 个")
+                if (summaryActivity > 0) sb.appendLine("   Activity泄露: $summaryActivity 个")
+                if (summaryFragment > 0) sb.appendLine("   Fragment泄露: $summaryFragment 个")
+                if (summaryAnimator > 0) sb.appendLine("   Animator泄露: $summaryAnimator 个")
                 sb.appendLine()
             }
 
@@ -1728,8 +1712,10 @@ class HprofAnalyzer {
 
             if (leakingObjects.isNotEmpty()) {
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                sb.appendLine("🚨 内存泄露对象 (${leakingObjects.size})")
+                sb.appendLine("🚨 内存泄露对象 (${leakingObjects.size} 条代表性路径)")
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                sb.appendLine("   💡 以下为路径去重后的代表性泄露路径；完整各类数量见上方「类实例统计」。")
+                sb.appendLine()
 
                 val byType = leakingObjects.groupBy { obj ->
                     // 优先使用 leakReason 判断类型，更准确
@@ -1793,14 +1779,16 @@ class HprofAnalyzer {
                 sb.appendLine("✅ 未发现内存泄露")
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 sb.appendLine("   没有检测到Activity或Fragment的内存泄露。")
-                sb.appendLine("   (Bitmap分析请查看 bitmap_analysis.html)")
+                if (hasBitmapAnalysis) {
+                    sb.appendLine("   (Bitmap分析请查看 bitmap_analysis.html)")
+                }
                 sb.appendLine()
             }
 
             return sb.toString()
         }
 
-        private fun generateHtmlReport(bitmapOutputDir: Path?): String {
+        private fun generateHtmlReport(bitmapOutputDir: Path?, hasBitmapAnalysis: Boolean = false): String {
             // 辅助函数：HTML 转义
             fun escapeHtml(text: String?): String {
                 if (text == null) return ""
@@ -1922,15 +1910,12 @@ class HprofAnalyzer {
             sb.appendLine("                文件: ${file.name} | 大小: ${stats.formatSize(fileSize)} | 分析耗时: ${analyzeTime}ms")
             sb.appendLine("            </div>")
             
-            // 泄露摘要
-            // 检查是否有线程泄露
+            // 泄露摘要（Activity/Fragment/Animator 与类实例统计一致：从 classStatistics 汇总）
             val threadLeaks = stats.threadNameCount.filter { it.value > 5 }
             val hasThreadLeak = threadLeaks.isNotEmpty()
-            
-            // 计算实际泄露的实例总数（所有instanceCount之和）
-            val totalLeakInstances = leakingObjects.sumOf { it.instanceCount }
-            
-            // 根据leakingObjects统计各类型的数量（更准确）
+            val summaryActivity = classStatistics.filter { it.className.contains("Activity") && !it.className.contains("ActivityThread") }.sumOf { it.leakInstanceCount }
+            val summaryFragment = classStatistics.filter { it.className.contains("Fragment") && it.className != REPORT_FRAGMENT_CLASS_NAME }.sumOf { it.leakInstanceCount }
+            val summaryAnimator = classStatistics.filter { it.className.contains("Animator") }.sumOf { it.leakInstanceCount }
             val leakCountByType = leakingObjects.groupBy { obj ->
                 when {
                     obj.leakReason.contains("Service", ignoreCase = true) -> "Service"
@@ -1942,11 +1927,10 @@ class HprofAnalyzer {
                     else -> "Other"
                 }
             }
-            
-            // 计算各类型的实例总数（考虑instanceCount）
-            val typeInstanceCounts = leakCountByType.mapValues { (_, objects) ->
-                objects.sumOf { it.instanceCount }
-            }
+            val typeInstanceCounts = leakCountByType.mapValues { (_, objects) -> objects.sumOf { it.instanceCount } }
+            val totalLeakInstances = summaryActivity + summaryFragment + summaryAnimator +
+                (typeInstanceCounts["Service"] ?: 0) + (typeInstanceCounts["Dialog"] ?: 0) +
+                (typeInstanceCounts["Bitmap"] ?: 0) + (typeInstanceCounts["Other"] ?: 0)
             
             if (leakingObjects.isNotEmpty() || hasThreadLeak) {
                 sb.appendLine("            <div class=\"leak-summary has-leak\" id=\"leak-summary\">")
@@ -1961,11 +1945,11 @@ class HprofAnalyzer {
                 }
                 sb.appendLine("                </div>")
                 sb.appendLine("                <div class=\"leak-summary-grid\">")
-                typeInstanceCounts["Activity"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Activity</div><div class=\"value\">$it</div></div>") }
-                typeInstanceCounts["Fragment"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Fragment</div><div class=\"value\">$it</div></div>") }
+                if (summaryActivity > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Activity</div><div class=\"value\">$summaryActivity</div></div>")
+                if (summaryFragment > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Fragment</div><div class=\"value\">$summaryFragment</div></div>")
                 typeInstanceCounts["Service"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Service</div><div class=\"value\">$it</div></div>") }
                 typeInstanceCounts["Dialog"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Dialog</div><div class=\"value\">$it</div></div>") }
-                typeInstanceCounts["Animator"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Animator</div><div class=\"value\">$it</div></div>") }
+                if (summaryAnimator > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Animator</div><div class=\"value\">$summaryAnimator</div></div>")
                 typeInstanceCounts["Bitmap"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Bitmap</div><div class=\"value\">$it</div></div>") }
                 if (hasThreadLeak) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">线程泄露</div><div class=\"value\">${threadLeaks.size} 种</div></div>")
                 sb.appendLine("                </div>")
@@ -1999,7 +1983,10 @@ class HprofAnalyzer {
             // 1. 内存泄露对象（核心内容）
             if (leakingObjects.isNotEmpty()) {
                 sb.appendLine("        <div class=\"section leak-section\" id=\"leak-objects\">")
-                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🚨</span>内存泄露对象 (${totalLeakInstances} 个实例)</div>")
+                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">🚨</span>内存泄露对象 (${leakingObjects.size} 条代表性路径)</div>")
+                sb.appendLine("            <div style=\"margin-bottom: 15px; padding: 10px; background: #fff3e0; border-radius: 4px; border-left: 3px solid #ff9800; font-size: 12px; color: #666;\">")
+                sb.appendLine("                <strong>说明:</strong> 以下为路径去重后的代表性泄露路径；完整各类泄露数量请查看下方「类实例统计」。")
+                sb.appendLine("            </div>")
 
                 val byType = leakingObjects.groupBy { obj ->
                     // 优先使用 leakReason 判断类型，更准确
@@ -2199,11 +2186,13 @@ class HprofAnalyzer {
                     sb.appendLine("                <div class=\"stat-card\"><div class=\"label\">泄露的大ByteArray(>1MB)</div><div class=\"value\">${stats.leakedByteArrayCount}</div></div>")
                 }
                 sb.appendLine("            </div>")
-                sb.appendLine("            <div class=\"info-box\">")
-                sb.appendLine("                <div style=\"font-size: 13px; color: #666;\">")
-                sb.appendLine("                    <strong>详细分析:</strong> 查看 <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a> 获取完整的Bitmap分析报告")
-                sb.appendLine("                </div>")
-                sb.appendLine("            </div>")
+                if (hasBitmapAnalysis) {
+                    sb.appendLine("            <div class=\"info-box\">")
+                    sb.appendLine("                <div style=\"font-size: 13px; color: #666;\">")
+                    sb.appendLine("                    <strong>详细分析:</strong> 查看 <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a> 获取完整的Bitmap分析报告")
+                    sb.appendLine("                </div>")
+                    sb.appendLine("            </div>")
+                }
                 sb.appendLine("        </div>")
             }
 
@@ -2281,13 +2270,15 @@ class HprofAnalyzer {
             sb.appendLine("                    <div class=\"stat-card\"><div class=\"label\">Bitmap数量</div><div class=\"value\">${stats.bitmapCount}</div></div>")
             sb.appendLine("                    <div class=\"stat-card\"><div class=\"label\">大Bitmap(>1M像素)</div><div class=\"value\">${stats.largeBitmapCount}</div></div>")
             sb.appendLine("                </div>")
-            sb.appendLine("                <div class=\"info-box\">")
-            sb.appendLine("                    <div class=\"title\">📁 Bitmap详细分析</div>")
-            sb.appendLine("                    <div>查看 <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a> 获取完整的Bitmap分析报告</div>")
-            if (bitmapOutputDir != null) {
-                sb.appendLine("                    <div style=\"margin-top: 5px; font-size: 12px; color: #666;\">Bitmap图片目录: ${bitmapOutputDir.fileName}/</div>")
+            if (hasBitmapAnalysis) {
+                sb.appendLine("                <div class=\"info-box\">")
+                sb.appendLine("                    <div class=\"title\">📁 Bitmap详细分析</div>")
+                sb.appendLine("                    <div>查看 <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a> 获取完整的Bitmap分析报告</div>")
+                if (bitmapOutputDir != null) {
+                    sb.appendLine("                    <div style=\"margin-top: 5px; font-size: 12px; color: #666;\">Bitmap图片目录: ${bitmapOutputDir.fileName}/</div>")
+                }
+                sb.appendLine("                </div>")
             }
-            sb.appendLine("                </div>")
             sb.appendLine("            </div>")
             sb.appendLine("        </div>")
 
@@ -2301,10 +2292,12 @@ class HprofAnalyzer {
                 if (stats.leakedBitmapCount > 0 || stats.leakedByteArrayCount > 0) {
                     sb.appendLine("                <p style=\"margin-top: 10px; color: #666;\">但检测到大对象占用内存，请查看上方的\"大对象统计\"。</p>")
                 }
-                sb.appendLine("                <div class=\"info-box\" style=\"display: inline-block; margin-top: 20px;\">")
-                sb.appendLine("                    <div class=\"title\">📁 查看Bitmap分析</div>")
-                sb.appendLine("                    <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a> - 包含所有大Bitmap和重复Bitmap的分析")
-                sb.appendLine("                </div>")
+                if (hasBitmapAnalysis) {
+                    sb.appendLine("                <div class=\"info-box\" style=\"display: inline-block; margin-top: 20px;\">")
+                    sb.appendLine("                    <div class=\"title\">📁 查看Bitmap分析</div>")
+                    sb.appendLine("                    <a href=\"bitmap_analysis.html\" class=\"link\">bitmap_analysis.html</a> - 包含所有大Bitmap和重复Bitmap的分析")
+                    sb.appendLine("                </div>")
+                }
                 sb.appendLine("            </div>")
                 sb.appendLine("        </div>")
             }

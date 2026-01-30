@@ -85,10 +85,8 @@ class AnalyzeCommand : Runnable {
             val analyzer = HprofAnalyzer()
             val result = analyzer.analyze(actualHprofPath.toFile(), bitmapDir)
 
-            // 打印到控制台
-            result.printReport()
-
-            // 提取Bitmap
+            // 提取Bitmap（需要在 printReport 之前执行，以便知道是否生成了 bitmap_analysis.html）
+            var hasBitmapAnalysis = false
             if (shouldExtractBitmaps && bitmapDir != null) {
                 println("\n🖼️  正在提取Bitmap...")
                 val extractor = BitmapExtractor()
@@ -106,10 +104,14 @@ class AnalyzeCommand : Runnable {
                 val bitmapHtmlFile = actualOutputDir.resolve("bitmap_analysis.html")
                 Files.writeString(bitmapTxtFile, extractor.generateReport(bitmapResult))
                 Files.writeString(bitmapHtmlFile, extractor.generateHtmlReport(bitmapResult))
+                hasBitmapAnalysis = true
             }
 
+            // 打印到控制台
+            result.printReport(hasBitmapAnalysis)
+
             // 保存报告到文件（在bitmap提取之后，不带时间戳）
-            val savedFiles = result.saveReport(actualOutputDir).toMutableList()
+            val savedFiles = result.saveReport(actualOutputDir, hasBitmapAnalysis).toMutableList()
 
             // 添加bitmap报告文件到列表
             if (shouldExtractBitmaps && bitmapDir != null) {

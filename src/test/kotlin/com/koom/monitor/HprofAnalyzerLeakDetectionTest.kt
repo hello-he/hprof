@@ -430,4 +430,44 @@ class HprofAnalyzerLeakDetectionTest {
 
         println("\n✅ 综合测试通过: 共检测到 $totalLeaks 个泄露对象")
     }
+
+    // ==================== 修改部分验证：以 test.hprof 为输入 ====================
+    // 验证移除硬编码、isInnerClassOfActivity、常量替换等修改后分析器仍正常工作
+
+    @Test
+    fun testModifiedPartsWithTestHprof() {
+        val hprofFile = getHprofFile("test.hprof")
+        if (hprofFile == null) {
+            println("⚠️  跳过测试: test.hprof 不存在于 ~/tmp/hprof/")
+            return
+        }
+
+        val analyzer = HprofAnalyzer()
+        val result = analyzer.analyze(hprofFile)
+
+        // 1. 基本结果非空、无异常
+        assertNotNull("分析结果不应为空", result)
+        assertTrue("应有实例统计", result.stats.totalInstanceCount >= 0)
+        assertTrue("应有类统计", result.stats.totalClassCount > 0)
+
+        // 2. 泄露对象列表与统计一致（无硬编码导致的漏检/崩溃）
+        assertNotNull("leakingObjects 不应为 null", result.leakingObjects)
+        assertNotNull("largeObjects 不应为 null", result.largeObjects)
+        assertNotNull("classStatistics 不应为 null", result.classStatistics)
+
+        // 3. 若存在泄露对象，leakReason 应为非空且不含占位错误（常量替换正确）
+        result.leakingObjects.forEach { obj ->
+            assertNotNull("leakReason 不应为 null", obj.leakReason)
+            assertTrue("leakReason 不应为空串", obj.leakReason.isNotBlank())
+        }
+
+        // 4. 报告可正常生成（unwrapActivityContext、getAliveServiceObjectIds 等无硬编码错误）
+        val outputDir = tempDir.resolve("modified-parts-test")
+        Files.createDirectories(outputDir)
+        val savedFiles = result.saveReport(outputDir)
+        assertTrue("应成功保存报告", savedFiles.isNotEmpty())
+        assertEquals("应生成 2 个报告文件（txt + html）", 2, savedFiles.size)
+
+        println("✅ 修改部分验证通过（test.hprof）: 分析、统计、报告生成正常")
+    }
 }

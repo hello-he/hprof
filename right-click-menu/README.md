@@ -9,7 +9,6 @@
 - **Activity 泄露** - Activity 已销毁但仍被引用
 - **Fragment 泄露** - Fragment 生命周期已结束但仍被引用
 - **Service 泄露** - Service 未被 ActivityThread 持有但仍可达
-- **BroadcastReceiver 泄露** - BroadcastReceiver 的 mContext 持有已销毁的 Activity 引用，或 BroadcastReceiver 是 Activity 的非静态内部类（隐式持有 Activity 引用）
 - **Animator 泄露** - 无限循环动画持有引用
 - **大 Bitmap 泄露** - 超过 1M 像素的 Bitmap 占用大量内存
 - **大 ByteArray 泄露** - 超过 1MB 的字节数组占用大量内存

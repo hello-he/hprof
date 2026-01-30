@@ -40,7 +40,6 @@ class HprofAnalyzer {
         private const val VIEWMODEL_CLASS_NAME = "androidx.lifecycle.ViewModel"
         private const val SERVICE_CLASS_NAME = "android.app.Service"
         private const val MESSAGE_CLASS_NAME = "android.os.Message"
-        private const val BROADCAST_RECEIVER_CLASS_NAME = "android.content.BroadcastReceiver"
         private const val OBJECT_ANIMATOR_CLASS_NAME = "android.animation.ObjectAnimator"
         private const val VALUE_ANIMATOR_CLASS_NAME = "android.animation.ValueAnimator"
         private const val ANIMATOR_CLASS_NAME = "android.animation.Animator"
@@ -116,7 +115,6 @@ class HprofAnalyzer {
             val fragmentClass = androidxFragmentClass ?: nativeFragmentClass ?: supportFragmentClass
             val bitmapClass = graph.findClassByName(BITMAP_CLASS_NAME)
             val serviceClass = graph.findClassByName(SERVICE_CLASS_NAME)
-            val broadcastReceiverClass = graph.findClassByName(BROADCAST_RECEIVER_CLASS_NAME)
             val objectAnimatorClass = graph.findClassByName(OBJECT_ANIMATOR_CLASS_NAME)
             val valueAnimatorClass = graph.findClassByName(VALUE_ANIMATOR_CLASS_NAME)
             val nativeAllocationRegistryClass = graph.findClassByName(NATIVE_ALLOCATION_REGISTRY_CLASS_NAME)
@@ -154,7 +152,6 @@ class HprofAnalyzer {
                             isFragment(fragmentClass, instance) ||
                             isBitmap(bitmapClass, instance) ||
                             isService(serviceClass, instance) ||
-                            isBroadcastReceiver(broadcastReceiverClass, instance) ||
                             isObjectAnimator(objectAnimatorClass, instance) ||
                             isValueAnimator(valueAnimatorClass, instance) ||
                             isNativeAllocationRegistry(nativeAllocationRegistryClass, instance) ||
@@ -349,48 +346,6 @@ class HprofAnalyzer {
                             continue
                         }
 
-                        // 检查BroadcastReceiver泄露（参考LeakCanary）
-                        if (isBroadcastReceiver(broadcastReceiverClass, instance)) {
-                            val receiverClassName = instance.instanceClassName
-                            
-                            // 检查BroadcastReceiver是否是Activity的非静态内部类
-                            val isInnerClassReceiver = isInnerClassOfActivity(graph, activityClass, receiverClassName)
-                            
-                            // 检查BroadcastReceiver的mContext是否引用已销毁的Activity
-                            val mContextField = instance[BROADCAST_RECEIVER_CLASS_NAME, "mContext"]
-                            if (mContextField != null && mContextField.value.isNonNullReference) {
-                                val mContext = mContextField.value.asObject!!.asInstance!!
-                                val activityContext = mContext.unwrapActivityContext(graph)
-                                val destroyed = activityContext?.let { 
-                                    it[ACTIVITY_CLASS_NAME, DESTROYED_FIELD_NAME]?.value?.asBoolean 
-                                }
-                                // 如果BroadcastReceiver的mContext持有Activity引用，认为是泄露
-                                // 或者如果BroadcastReceiver是Activity的内部类，也认为是泄露（因为非静态内部类隐式持有外部类引用）
-                                if (activityContext != null || isInnerClassReceiver) {
-                                    val objectCounter = updateClassCounter(instance.instanceClassId)
-                                    if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
-                                        leakingIds.add(instance.objectId)
-                                        stats.leakedBroadcastReceiverCount++
-                                        if (activityContext != null) {
-                                            logger.info("发现泄漏BroadcastReceiver: $receiverClassName (mContext references activity, destroyed=$destroyed, activityClassName=${activityContext.instanceClassName})")
-                                        } else {
-                                            logger.info("发现泄漏BroadcastReceiver: $receiverClassName (is inner class of Activity)")
-                                        }
-                                    }
-                                }
-                            }
-                            // 如果BroadcastReceiver是Activity的内部类，即使mContext为null，也认为是泄露
-                            else if (isInnerClassReceiver) {
-                                val objectCounter = updateClassCounter(instance.instanceClassId)
-                                if (objectCounter.leakCnt <= SAME_CLASS_LEAK_OBJECT_PATH_THRESHOLD) {
-                                    leakingIds.add(instance.objectId)
-                                    stats.leakedBroadcastReceiverCount++
-                                    logger.info("发现泄漏BroadcastReceiver: $receiverClassName (is inner class of Activity, mContext is null)")
-                                }
-                            }
-                            continue
-                        }
-
                         // 检查Animator泄露（参考LeakCanary：检查mStarted、mRunning、mRepeatCount）
                         val isObjectAnimator = isObjectAnimator(objectAnimatorClass, instance)
                         val isValueAnimator = isValueAnimator(valueAnimatorClass, instance)
@@ -455,7 +410,7 @@ class HprofAnalyzer {
                     buildLeakingObjects(
                         heapAnalysis, graph, stats, bitmapMap, bitmapOutputDir,
                         activityClass, fragmentClass, bitmapClass, serviceClass,
-                        broadcastReceiverClass, objectAnimatorClass, valueAnimatorClass
+                        objectAnimatorClass, valueAnimatorClass
                     )
                 }
                 is kshark.HeapAnalysisFailure -> {
@@ -675,7 +630,6 @@ class HprofAnalyzer {
         fragmentClass: HeapClass?,
         bitmapClass: HeapClass?,
         serviceClass: HeapClass?,
-        broadcastReceiverClass: HeapClass?,
         objectAnimatorClass: HeapClass?,
         valueAnimatorClass: HeapClass?
     ): String {
@@ -732,28 +686,6 @@ class HprofAnalyzer {
             }
         }
 
-        // BroadcastReceiver泄露
-        if (broadcastReceiverClass != null && isBroadcastReceiver(broadcastReceiverClass, instance)) {
-            val mContextField = instance[BROADCAST_RECEIVER_CLASS_NAME, "mContext"]
-            if (mContextField != null && mContextField.value.isNonNullReference) {
-                val mContext = mContextField.value.asObject!!.asInstance!!
-                val activityContext = mContext.unwrapActivityContext(graph)
-                val destroyed = activityContext?.let { 
-                    it[ACTIVITY_CLASS_NAME, DESTROYED_FIELD_NAME]?.value?.asBoolean 
-                } ?: false
-                if (activityContext != null) {
-                    return "BroadcastReceiver Leak: mContext references ${if (destroyed == true) "destroyed " else ""}activity but still reachable"
-                }
-            }
-            // 检查是否是Activity的内部类
-            val receiverClassName = instance.instanceClassName
-            val isInnerClassReceiver = isInnerClassOfActivity(graph, activityClass, receiverClassName)
-            if (isInnerClassReceiver) {
-                return "BroadcastReceiver Leak: inner class of Activity holds reference"
-            }
-            return "BroadcastReceiver Leak: registered but not unregistered"
-        }
-
         // Animator泄露
         if ((objectAnimatorClass != null && isObjectAnimator(objectAnimatorClass, instance)) ||
             (valueAnimatorClass != null && isValueAnimator(valueAnimatorClass, instance))) {
@@ -796,7 +728,6 @@ class HprofAnalyzer {
         fragmentClass: HeapClass?,
         bitmapClass: HeapClass?,
         serviceClass: HeapClass?,
-        broadcastReceiverClass: HeapClass?,
         objectAnimatorClass: HeapClass?,
         valueAnimatorClass: HeapClass?
     ): List<LeakingObject> {
@@ -890,13 +821,12 @@ class HprofAnalyzer {
                 val leakReason = determineLeakReason(
                     graph, leakingObjectId, leakTrace.leakingObject.className,
                     activityClass, fragmentClass, bitmapClass, serviceClass,
-                    broadcastReceiverClass, objectAnimatorClass, valueAnimatorClass
+                    objectAnimatorClass, valueAnimatorClass
                 )
                 
-                // 对于某些类型的泄露（BroadcastReceiver、Service、Handler/Message、Animator），
+                // 对于某些类型的泄露（Service、Handler/Message、Animator），
                 // 不显示内部的Bitmap，因为泄露的根本原因不是Bitmap
-                val shouldSkipBitmap = leakReason.contains("BroadcastReceiver", ignoreCase = true) ||
-                        leakReason.contains("Service", ignoreCase = true) ||
+                val shouldSkipBitmap = leakReason.contains("Service", ignoreCase = true) ||
                         leakReason.contains("Handler", ignoreCase = true) ||
                         leakReason.contains("Message", ignoreCase = true) ||
                         leakReason.contains("Animator", ignoreCase = true)
@@ -1005,13 +935,12 @@ class HprofAnalyzer {
                 val leakReason = determineLeakReason(
                     graph, leakingObjectId, leakTrace.leakingObject.className,
                     activityClass, fragmentClass, bitmapClass, serviceClass,
-                    broadcastReceiverClass, objectAnimatorClass, valueAnimatorClass
+                    objectAnimatorClass, valueAnimatorClass
                 )
                 
-                // 对于某些类型的泄露（BroadcastReceiver、Service、Handler/Message、Animator），
+                // 对于某些类型的泄露（Service、Handler/Message、Animator），
                 // 不显示内部的Bitmap，因为泄露的根本原因不是Bitmap
-                val shouldSkipBitmap = leakReason.contains("BroadcastReceiver", ignoreCase = true) ||
-                        leakReason.contains("Service", ignoreCase = true) ||
+                val shouldSkipBitmap = leakReason.contains("Service", ignoreCase = true) ||
                         leakReason.contains("Handler", ignoreCase = true) ||
                         leakReason.contains("Message", ignoreCase = true) ||
                         leakReason.contains("Animator", ignoreCase = true)
@@ -1262,18 +1191,6 @@ class HprofAnalyzer {
         return !isSystemClass(className)
     }
 
-    private fun isBroadcastReceiver(receiverClass: HeapClass?, instance: HeapInstance): Boolean {
-        // 检查是否是BroadcastReceiver或其子类
-        if (receiverClass != null) {
-            val hierarchy = instance.instanceClass.classHierarchy.toList()
-            if (hierarchy.any { it.objectId == receiverClass.objectId }) {
-                return true
-            }
-        }
-        // 也检查类名是否包含BroadcastReceiver（处理匿名内部类的情况）
-        return instance.instanceClassName.contains("BroadcastReceiver", ignoreCase = true)
-    }
-
     private fun isObjectAnimator(animatorClass: HeapClass?, instance: HeapInstance): Boolean {
         if (animatorClass == null) return false
         val hierarchy = instance.instanceClass.classHierarchy.toList()
@@ -1286,42 +1203,6 @@ class HprofAnalyzer {
         return hierarchy.any { it.objectId == animatorClass.objectId }
     }
 
-    /**
-     * 检查一个类是否是Activity的内部类（非静态内部类）
-     * 通过解析类名获取外部类名，然后检查外部类是否是Activity类型
-     * 
-     * @param graph heap graph
-     * @param activityClass Activity类对象
-     * @param instanceClassName 要检查的类的完整类名
-     * @return 如果该类是Activity的非静态内部类，返回true
-     */
-    private fun isInnerClassOfActivity(
-        graph: kshark.HeapGraph,
-        activityClass: HeapClass?,
-        instanceClassName: String
-    ): Boolean {
-        // 内部类的类名格式：OuterClass$InnerClass 或 OuterClass$数字（匿名内部类）
-        if (!instanceClassName.contains("$")) {
-            return false
-        }
-
-        // 系统类不可能是Activity的内部类
-        if (isSystemClass(instanceClassName)) {
-            return false
-        }
-
-        // 提取外部类名（$之前的部分）
-        val outerClassName = instanceClassName.substringBefore("$")
-        
-        // 在heap graph中查找外部类
-        val outerClass = graph.findClassByName(outerClassName) ?: return false
-        
-        // 检查外部类是否是Activity类型
-        if (activityClass == null) return false
-        val outerClassHierarchy = outerClass.classHierarchy.toList()
-        return outerClassHierarchy.any { it.objectId == activityClass.objectId }
-    }
-    
     /**
      * 检查Bitmap是否在Fragment/Activity的引用链中
      * 如果Fragment/Activity已经泄露，Bitmap不应该单独报告为泄露
@@ -1473,7 +1354,6 @@ class HprofAnalyzer {
         var leakedBitmapCount: Int = 0,
         var leakedByteArrayCount: Int = 0,
         var leakedServiceCount: Int = 0,
-        var leakedBroadcastReceiverCount: Int = 0,
         var leakedAnimatorCount: Int = 0,
         var threadCount: Int = 0,
         val threadNameCount: MutableMap<String, Int> = mutableMapOf(),
@@ -1579,14 +1459,12 @@ class HprofAnalyzer {
 
             // 泄露类型统计
             if (stats.leakedActivityCount > 0 || stats.leakedFragmentCount > 0 || 
-                stats.leakedBroadcastReceiverCount > 0 ||
                 stats.leakedAnimatorCount > 0) {
                 println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 println("🚨 泄露类型统计")
                 println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 if (stats.leakedActivityCount > 0) println("   Activity泄露: ${stats.leakedActivityCount} 个")
                 if (stats.leakedFragmentCount > 0) println("   Fragment泄露: ${stats.leakedFragmentCount} 个")
-                if (stats.leakedBroadcastReceiverCount > 0) println("   BroadcastReceiver泄露: ${stats.leakedBroadcastReceiverCount} 个")
                 if (stats.leakedAnimatorCount > 0) println("   Animator泄露: ${stats.leakedAnimatorCount} 个")
                 println()
             }
@@ -1808,14 +1686,12 @@ class HprofAnalyzer {
 
             // 泄露类型统计
             if (stats.leakedActivityCount > 0 || stats.leakedFragmentCount > 0 || 
-                stats.leakedBroadcastReceiverCount > 0 ||
                 stats.leakedAnimatorCount > 0) {
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 sb.appendLine("🚨 泄露类型统计")
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 if (stats.leakedActivityCount > 0) sb.appendLine("   Activity泄露: ${stats.leakedActivityCount} 个")
                 if (stats.leakedFragmentCount > 0) sb.appendLine("   Fragment泄露: ${stats.leakedFragmentCount} 个")
-                if (stats.leakedBroadcastReceiverCount > 0) sb.appendLine("   BroadcastReceiver泄露: ${stats.leakedBroadcastReceiverCount} 个")
                 if (stats.leakedAnimatorCount > 0) sb.appendLine("   Animator泄露: ${stats.leakedAnimatorCount} 个")
                 sb.appendLine()
             }
@@ -1859,9 +1735,8 @@ class HprofAnalyzer {
                     // 优先使用 leakReason 判断类型，更准确
                     // 注意：检查顺序很重要，Service 要在 Activity 之前，因为 "ActivityThread" 包含 "Activity"
                     when {
-                        obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "BroadcastReceiver"
-                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Service"
-                        obj.leakReason.contains("Activity", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Activity"
+                        obj.leakReason.contains("Service", ignoreCase = true) -> "Service"
+                        obj.leakReason.contains("Activity", ignoreCase = true) -> "Activity"
                         obj.leakReason.contains("Fragment", ignoreCase = true) -> "Fragment"
                         obj.leakReason.contains("Dialog", ignoreCase = true) -> "Dialog"
                         obj.leakReason.contains("Handler") || obj.leakReason.contains("Message", ignoreCase = true) -> "Handler/Message"
@@ -1870,7 +1745,6 @@ class HprofAnalyzer {
                         obj.leakReason.contains("ViewModel", ignoreCase = true) -> "ViewModel"
                         obj.leakReason.contains("View", ignoreCase = true) && !obj.leakReason.contains("ViewGroup", ignoreCase = true) -> "View"
                         // 如果 leakReason 无法判断，回退到类名判断
-                        obj.className.contains("BroadcastReceiver") -> "BroadcastReceiver"
                         obj.className.contains("Service") -> "Service"
                         obj.className.contains("Activity") -> "Activity"
                         obj.className.contains("Fragment") -> "Fragment"
@@ -2059,9 +1933,8 @@ class HprofAnalyzer {
             // 根据leakingObjects统计各类型的数量（更准确）
             val leakCountByType = leakingObjects.groupBy { obj ->
                 when {
-                    obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "BroadcastReceiver"
-                    obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Service"
-                    obj.leakReason.contains("Activity", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "Activity"
+                    obj.leakReason.contains("Service", ignoreCase = true) -> "Service"
+                    obj.leakReason.contains("Activity", ignoreCase = true) -> "Activity"
                     obj.leakReason.contains("Fragment", ignoreCase = true) -> "Fragment"
                     obj.leakReason.contains("Dialog", ignoreCase = true) -> "Dialog"
                     obj.leakReason.contains("Animator", ignoreCase = true) -> "Animator"
@@ -2092,7 +1965,6 @@ class HprofAnalyzer {
                 typeInstanceCounts["Fragment"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Fragment</div><div class=\"value\">$it</div></div>") }
                 typeInstanceCounts["Service"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Service</div><div class=\"value\">$it</div></div>") }
                 typeInstanceCounts["Dialog"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Dialog</div><div class=\"value\">$it</div></div>") }
-                typeInstanceCounts["BroadcastReceiver"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">BroadcastReceiver</div><div class=\"value\">$it</div></div>") }
                 typeInstanceCounts["Animator"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Animator</div><div class=\"value\">$it</div></div>") }
                 typeInstanceCounts["Bitmap"]?.let { if (it > 0) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">Bitmap</div><div class=\"value\">$it</div></div>") }
                 if (hasThreadLeak) sb.appendLine("                    <div class=\"leak-summary-item\"><div class=\"label\">线程泄露</div><div class=\"value\">${threadLeaks.size} 种</div></div>")
@@ -2133,9 +2005,8 @@ class HprofAnalyzer {
                     // 优先使用 leakReason 判断类型，更准确
                     // 注意：检查顺序很重要，Service 要在 Activity 之前，因为 "ActivityThread" 包含 "Activity"
                     when {
-                        obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "receiver"
-                        obj.leakReason.contains("Service", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "service"
-                        obj.leakReason.contains("Activity", ignoreCase = true) && !obj.leakReason.contains("BroadcastReceiver", ignoreCase = true) -> "activity"
+                        obj.leakReason.contains("Service", ignoreCase = true) -> "service"
+                        obj.leakReason.contains("Activity", ignoreCase = true) -> "activity"
                         obj.leakReason.contains("Fragment", ignoreCase = true) -> "fragment"
                         obj.leakReason.contains("Dialog", ignoreCase = true) -> "dialog"
                         obj.leakReason.contains("Handler") || obj.leakReason.contains("Message", ignoreCase = true) -> "handler"
@@ -2144,7 +2015,6 @@ class HprofAnalyzer {
                         obj.leakReason.contains("ViewModel", ignoreCase = true) -> "viewmodel"
                         obj.leakReason.contains("View", ignoreCase = true) && !obj.leakReason.contains("ViewGroup", ignoreCase = true) -> "view"
                         // 如果 leakReason 无法判断，回退到类名判断
-                        obj.className.contains("BroadcastReceiver") -> "receiver"
                         obj.className.contains("Service") -> "service"
                         obj.className.contains("Activity") -> "activity"
                         obj.className.contains("Fragment") -> "fragment"
@@ -2167,7 +2037,6 @@ class HprofAnalyzer {
                         "service" -> "Service"
                         "dialog" -> "Dialog"
                         "handler" -> "Handler/Message"
-                        "receiver" -> "BroadcastReceiver"
                         "animator" -> "Animator"
                         "bitmap" -> "Bitmap"
                         else -> "Other"

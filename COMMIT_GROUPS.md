@@ -5,42 +5,29 @@
 
 ---
 
-## 1. HprofAnalyzer：BroadcastReceiver 判断修复 + 去除硬编码
+## 1. 移除 BroadcastReceiver 支持（与 LeakCanary 对齐）
 
-**范围**：BroadcastReceiver 内部类判断改为基于类层次，所有类名/字符串改为常量。
+**范围**：LeakCanary 不支持 BroadcastReceiver 泄露检测，分析器、测试与文档同步移除相关能力。
 
 **建议提交文件**：
 - `src/main/java/com/koom/monitor/analyzer/HprofAnalyzer.kt`
-
-**建议提交信息**：
-```
-fix(analyzer): BroadcastReceiver 内部类判断与去除硬编码
-
-- 新增 isInnerClassOfActivity()，按外部类是否为 Activity 判断
-- 移除测试类名硬编码（LeakBroadcastReceiver 等）
-- 类名/字段名提取为常量（ActivityThread、LifecycleRegistry、ArrayMap 等）
-- unwrapActivityContext、isSystemClass、isMessage 等改用常量
-```
-
----
-
-## 2. right-click-menu README：BroadcastReceiver 描述修正
-
-**范围**：文档中 BroadcastReceiver 泄露描述与实现一致。
-
-**建议提交文件**：
+- `src/test/kotlin/com/koom/monitor/HprofAnalyzerLeakDetectionTest.kt`
 - `right-click-menu/README.md`
+- `COMMIT_GROUPS.md`
 
 **建议提交信息**：
 ```
-docs(right-click-menu): 修正 BroadcastReceiver 泄露描述
+fix(analyzer): 移除 BroadcastReceiver 泄露检测，与 LeakCanary 对齐
 
-与 HprofAnalyzer 检测逻辑一致：mContext 持有已销毁 Activity 或为非静态内部类
+- HprofAnalyzer 移除 BroadcastReceiver 检测、统计与报告
+- 移除 isBroadcastReceiver、isInnerClassOfActivity 及 leakedBroadcastReceiverCount
+- 测试移除 testBroadcastReceiverLeakDetection 及综合测试中的 BroadcastReceiver 统计
+- 文档移除 BroadcastReceiver 支持说明并更新 COMMIT_GROUPS
 ```
 
 ---
 
-## 3. device-watch：独立目录与脚本迁移
+## 2. device-watch：独立目录与脚本迁移
 
 **范围**：将设备端监控脚本从 `scripts/` 迁到 `device-watch/`。
 
@@ -60,7 +47,7 @@ refactor(device-watch): 设备端监控脚本迁至 device-watch 目录
 
 ---
 
-## 4. device-watch.sh：多包名、PSS 与“谁启动监控谁”
+## 3. device-watch.sh：多包名、PSS 与“谁启动监控谁”
 
 **范围**：支持多包名、去掉 PSS 展示、未启动仅跳过不等待。
 
@@ -78,7 +65,7 @@ feat(device-watch): 支持包名列表与监控逻辑调整
 
 ---
 
-## 5. deploy-device-watch.sh：仅推荐后台方式与停止说明
+## 4. deploy-device-watch.sh：仅推荐后台方式与停止说明
 
 **范围**：部署说明只推荐后台运行、补充停止与 watch.log 说明（不包含 package_list 相关）。
 
@@ -97,7 +84,7 @@ docs(deploy): 仅推荐后台运行并补充停止与 watch.log 说明
 
 ---
 
-## 6. deploy-device-watch.sh：package_list.txt 封装
+## 5. deploy-device-watch.sh：package_list.txt 封装
 
 **范围**：通过 package_list.txt 生成并推送 run-device-watch.sh。
 
@@ -117,7 +104,7 @@ feat(deploy): 支持 package_list.txt 生成设备端启动脚本
 
 ---
 
-## 7. DEVICE_WATCH.md：文档与路径更新
+## 6. DEVICE_WATCH.md：文档与路径更新
 
 **范围**：路径改为 device-watch/、停止说明、多包名与 package_list 说明。
 
@@ -134,7 +121,7 @@ docs(DEVICE_WATCH): 路径与用法更新
 
 ---
 
-## 8. 测试：修改部分验证（test.hprof）
+## 7. 测试：修改部分验证（test.hprof）
 
 **范围**：新增以 test.hprof 为输入的修改部分验证用例。
 
@@ -160,7 +147,7 @@ test(analyzer): 新增以 test.hprof 为输入的修改部分验证
 
 ## 建议提交顺序（可减少冲突）
 
-1. 先提交 **1（HprofAnalyzer）**、**2（README）**、**8（测试）**（分析器与文档、测试）。
-2. 再提交 **3（迁移）**、**4（device-watch.sh）**、**5（deploy 推荐后台）**、**6（package_list）**、**7（DEVICE_WATCH.md）**（设备端脚本与文档）。
+1. 先提交 **1（移除 BroadcastReceiver）**（分析器、测试与文档）。
+2. 再提交 **2（迁移）**、**3（device-watch.sh）**、**4（deploy 推荐后台）**、**5（package_list）**、**6（DEVICE_WATCH.md）**、**7（测试 test.hprof）**（按需）。
 
 按上述分组分别 `git add` 对应文件后执行 `git commit -m "..."` 即可实现「不同内容区分提交」。

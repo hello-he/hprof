@@ -140,28 +140,6 @@ class HprofAnalyzerLeakDetectionTest {
 
 
 
-    // ==================== BroadcastReceiver 泄露检测测试 ====================
-
-    @Test
-    fun testBroadcastReceiverLeakDetection() {
-        val hprofFile = getHprofFile("broadcast_receiver_leak.hprof")
-        if (hprofFile == null) {
-            println("⚠️  跳过测试: broadcast_receiver_leak.hprof 不存在")
-            println("   生成方法: 运行 demo APK，点击'BroadcastReceiver泄露'按钮，然后dump hprof")
-            return
-        }
-
-        val result = analyzeAndVerify(hprofFile)
-
-        // 验证 BroadcastReceiver 泄露被检测到
-        assertTrue(
-            "应该检测到 BroadcastReceiver 泄露",
-            result.stats.leakedBroadcastReceiverCount > 0
-        )
-
-        println("✅ BroadcastReceiver 泄露检测通过: 检测到 ${result.stats.leakedBroadcastReceiverCount} 个泄露")
-    }
-
     // ==================== Animator 泄露检测测试 ====================
 
     @Test
@@ -408,11 +386,10 @@ class HprofAnalyzerLeakDetectionTest {
 
         val result = analyzeAndVerify(hprofFile)
 
-        // 验证所有泄露类型都被统计
+        // 验证所有泄露类型都被统计（与 LeakCanary 对齐，不包含 BroadcastReceiver）
         val leakTypeCounts = mapOf(
             "Activity" to result.stats.leakedActivityCount,
             "Fragment" to result.stats.leakedFragmentCount,
-            "BroadcastReceiver" to result.stats.leakedBroadcastReceiverCount,
             "Animator" to result.stats.leakedAnimatorCount,
             "Bitmap" to result.stats.leakedBitmapCount,
             "ByteArray" to result.stats.leakedByteArrayCount

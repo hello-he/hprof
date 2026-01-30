@@ -46,6 +46,16 @@ class HprofAnalyzer {
         private const val ANIMATOR_CLASS_NAME = "android.animation.Animator"
         private const val NATIVE_ALLOCATION_REGISTRY_CLASS_NAME = "libcore.util.NativeAllocationRegistry"
         private const val NATIVE_ALLOCATION_CLEANER_THUNK_CLASS_NAME = "libcore.util.NativeAllocationRegistry\$CleanerThunk"
+        private const val ACTIVITY_THREAD_CLASS_NAME = "android.app.ActivityThread"
+        private const val LIFECYCLE_REGISTRY_CLASS_NAME = "androidx.lifecycle.LifecycleRegistry"
+        private const val ARRAY_MAP_CLASS_NAME = "android.util.ArrayMap"
+        private const val REPORT_FRAGMENT_CLASS_NAME = "androidx.lifecycle.ReportFragment"
+        private const val CONTEXT_WRAPPER_CLASS_NAME = "android.content.ContextWrapper"
+        private const val APPLICATION_CLASS_NAME = "android.app.Application"
+        private const val THREAD_CLASS_NAME = "java.lang.Thread"
+        private const val ACTIVITY_THREAD_CLASS_NAME_SUFFIX = "ActivityThread"
+        private const val FRAMEWORK_HANDLER_CLASS_NAME_SUFFIX = "FrameworkHandler"
+        private const val SYSTEM_HANDLER_CLASS_NAME_SUFFIX = "SystemHandler"
 
         // 字段名
         private const val FINISHED_FIELD_NAME = "mFinished"
@@ -229,7 +239,7 @@ class HprofAnalyzer {
                         if (isFragment(fragmentClass, instance)) {
                             // 排除系统Fragment（如androidx.lifecycle.ReportFragment）
                             val className = instance.instanceClassName
-                            if (className == "androidx.lifecycle.ReportFragment") {
+                            if (className == REPORT_FRAGMENT_CLASS_NAME) {
                                 continue
                             }
                             
@@ -243,7 +253,7 @@ class HprofAnalyzer {
                             if (mLifecycleRegistry != null) {
                                 // androidx.lifecycle.LifecycleRegistry 有 mState 字段（Lifecycle.State枚举）
                                 // DESTROYED 通常是枚举值 5
-                                val mState = mLifecycleRegistry["androidx.lifecycle.LifecycleRegistry", "mState"]?.value?.asInt
+                                val mState = mLifecycleRegistry[LIFECYCLE_REGISTRY_CLASS_NAME, "mState"]?.value?.asInt
                                 if (mState == 5) { // Lifecycle.State.DESTROYED
                                     isLeaked = true
                                     logger.debug("发现泄漏Fragment: ${instance.instanceClassName} (mLifecycleRegistry.state == DESTROYED)")
@@ -343,22 +353,8 @@ class HprofAnalyzer {
                         if (isBroadcastReceiver(broadcastReceiverClass, instance)) {
                             val receiverClassName = instance.instanceClassName
                             
-                            // 调试：记录所有BroadcastReceiver类名（用于查找我们的Receiver）
-                            if (receiverClassName.contains("LeakedBroadcastReceiverActivity") || 
-                                receiverClassName.contains("com.koom.leak")) {
-                                logger.info("找到应用BroadcastReceiver: $receiverClassName")
-                            }
-                            
                             // 检查BroadcastReceiver是否是Activity的非静态内部类
-                            // 非静态内部类的类名格式：OuterClass$数字 或 OuterClass$ClassName
-                            // 检测模式：
-                            // 1. 类名包含"LeakBroadcastReceiver"（如 MainActivity$LeakBroadcastReceiver）
-                            // 2. 类名包含"LeakedBroadcastReceiverActivity"
-                            // 3. 类名包含"$"且不是android包的类
-                            val isInnerClassReceiver = receiverClassName.contains("LeakBroadcastReceiver") ||
-                                receiverClassName.contains("LeakedBroadcastReceiverActivity") || 
-                                (receiverClassName.contains("$") && !isSystemClass(receiverClassName) && 
-                                 receiverClassName.matches(Regex(".*\\$\\d+.*")))
+                            val isInnerClassReceiver = isInnerClassOfActivity(graph, activityClass, receiverClassName)
                             
                             // 检查BroadcastReceiver的mContext是否引用已销毁的Activity
                             val mContextField = instance[BROADCAST_RECEIVER_CLASS_NAME, "mContext"]
@@ -527,7 +523,7 @@ class HprofAnalyzer {
         
         try {
             // 查找ActivityThread类
-            val activityThreadClass = graph.findClassByName("android.app.ActivityThread")
+            val activityThreadClass = graph.findClassByName(ACTIVITY_THREAD_CLASS_NAME)
             if (activityThreadClass == null) {
                 logger.debug("未找到ActivityThread类")
                 return serviceObjectIds
@@ -541,7 +537,7 @@ class HprofAnalyzer {
             }
             
             // 获取mServices字段（ArrayMap<String, Service>）
-            val mServicesField = sCurrentActivityThread["android.app.ActivityThread", "mServices"]
+            val mServicesField = sCurrentActivityThread[ACTIVITY_THREAD_CLASS_NAME, "mServices"]
             if (mServicesField == null || mServicesField.value.isNullReference) {
                 logger.debug("未找到mServices字段或为null")
                 return serviceObjectIds
@@ -553,7 +549,7 @@ class HprofAnalyzer {
                 val mServicesInstance = mServicesObject as HeapInstance
                 
                 // ArrayMap有mArray字段存储键值对
-                val mArrayField = mServicesInstance["android.util.ArrayMap", "mArray"]
+                val mArrayField = mServicesInstance[ARRAY_MAP_CLASS_NAME, "mArray"]
                 if (mArrayField != null && mArrayField.value.isNonNullReference) {
                     val mArrayObject = mArrayField.value.asObject
                     if (mArrayObject != null && mArrayObject is kshark.HeapObject.HeapObjectArray) {
@@ -589,7 +585,7 @@ class HprofAnalyzer {
      * 分析线程信息
      */
     private fun analyzeThreads(graph: kshark.HeapGraph, stats: Statistics) {
-        val threadClass = graph.findClassByName("java.lang.Thread")
+        val threadClass = graph.findClassByName(THREAD_CLASS_NAME)
         if (threadClass == null) {
             logger.debug("未找到Thread类")
             return
@@ -699,7 +695,7 @@ class HprofAnalyzer {
         if (fragmentClass != null && isFragment(fragmentClass, instance)) {
             val mLifecycleRegistry = instance[fragmentClass.name, "mLifecycleRegistry"]?.value?.asObject?.asInstance
             if (mLifecycleRegistry != null) {
-                val mState = mLifecycleRegistry["androidx.lifecycle.LifecycleRegistry", "mState"]?.value?.asInt
+                val mState = mLifecycleRegistry[LIFECYCLE_REGISTRY_CLASS_NAME, "mState"]?.value?.asInt
                 if (mState == 5) { // Lifecycle.State.DESTROYED
                     return "Fragment Leak: mLifecycleRegistry.state == DESTROYED but still reachable"
                 }
@@ -751,9 +747,7 @@ class HprofAnalyzer {
             }
             // 检查是否是Activity的内部类
             val receiverClassName = instance.instanceClassName
-            val isInnerClassReceiver = receiverClassName.contains("$") && 
-                !receiverClassName.startsWith("android.") &&
-                receiverClassName.matches(Regex(".*\\$.*"))
+            val isInnerClassReceiver = isInnerClassOfActivity(graph, activityClass, receiverClassName)
             if (isInnerClassReceiver) {
                 return "BroadcastReceiver Leak: inner class of Activity holds reference"
             }
@@ -1243,7 +1237,7 @@ class HprofAnalyzer {
             }
         }
         // 也检查类名是否包含Message（处理自定义Message子类的情况）
-        return instance.instanceClassName == "android.os.Message" || 
+        return instance.instanceClassName == MESSAGE_CLASS_NAME || 
                instance.instanceClassName.contains("Message", ignoreCase = true)
     }
 
@@ -1256,9 +1250,9 @@ class HprofAnalyzer {
             className.startsWith("com.android.") ||
             className.startsWith("androidx.") ||
             className.startsWith("com.android.internal.") ||
-            className.contains("ActivityThread") ||
-            className.contains("FrameworkHandler") ||
-            className.contains("SystemHandler")
+            className.endsWith(ACTIVITY_THREAD_CLASS_NAME_SUFFIX) ||
+            className.endsWith(FRAMEWORK_HANDLER_CLASS_NAME_SUFFIX) ||
+            className.endsWith(SYSTEM_HANDLER_CLASS_NAME_SUFFIX)
     }
 
     /**
@@ -1290,6 +1284,42 @@ class HprofAnalyzer {
         if (animatorClass == null) return false
         val hierarchy = instance.instanceClass.classHierarchy.toList()
         return hierarchy.any { it.objectId == animatorClass.objectId }
+    }
+
+    /**
+     * 检查一个类是否是Activity的内部类（非静态内部类）
+     * 通过解析类名获取外部类名，然后检查外部类是否是Activity类型
+     * 
+     * @param graph heap graph
+     * @param activityClass Activity类对象
+     * @param instanceClassName 要检查的类的完整类名
+     * @return 如果该类是Activity的非静态内部类，返回true
+     */
+    private fun isInnerClassOfActivity(
+        graph: kshark.HeapGraph,
+        activityClass: HeapClass?,
+        instanceClassName: String
+    ): Boolean {
+        // 内部类的类名格式：OuterClass$InnerClass 或 OuterClass$数字（匿名内部类）
+        if (!instanceClassName.contains("$")) {
+            return false
+        }
+
+        // 系统类不可能是Activity的内部类
+        if (isSystemClass(instanceClassName)) {
+            return false
+        }
+
+        // 提取外部类名（$之前的部分）
+        val outerClassName = instanceClassName.substringBefore("$")
+        
+        // 在heap graph中查找外部类
+        val outerClass = graph.findClassByName(outerClassName) ?: return false
+        
+        // 检查外部类是否是Activity类型
+        if (activityClass == null) return false
+        val outerClassHierarchy = outerClass.classHierarchy.toList()
+        return outerClassHierarchy.any { it.objectId == activityClass.objectId }
     }
     
     /**
@@ -1360,23 +1390,23 @@ class HprofAnalyzer {
      * 展开 Context 获取 Activity（参考 LeakCanary）
      */
     private fun HeapInstance.unwrapActivityContext(graph: kshark.HeapGraph): HeapInstance? {
-        val contextWrapperClass = graph.findClassByName("android.content.ContextWrapper")
+        val contextWrapperClass = graph.findClassByName(CONTEXT_WRAPPER_CLASS_NAME)
         if (contextWrapperClass == null) return null
 
         val matchingClassName = instanceClass.classHierarchy.map { it.name }
             .firstOrNull {
                 when (it) {
-                    "android.content.ContextWrapper",
-                    "android.app.Activity",
-                    "android.app.Application",
-                    "android.app.Service"
+                    CONTEXT_WRAPPER_CLASS_NAME,
+                    ACTIVITY_CLASS_NAME,
+                    APPLICATION_CLASS_NAME,
+                    SERVICE_CLASS_NAME
                     -> true
                     else -> false
                 }
             } ?: return null
 
-        if (matchingClassName != "android.content.ContextWrapper") {
-            return if (matchingClassName == "android.app.Activity") this else null
+        if (matchingClassName != CONTEXT_WRAPPER_CLASS_NAME) {
+            return if (matchingClassName == ACTIVITY_CLASS_NAME) this else null
         }
 
         var context = this
@@ -1385,7 +1415,7 @@ class HprofAnalyzer {
         while (keepUnwrapping) {
             visitedInstances += context.objectId
             keepUnwrapping = false
-            val mBase = context["android.content.ContextWrapper", "mBase"]?.value
+            val mBase = context[CONTEXT_WRAPPER_CLASS_NAME, "mBase"]?.value
 
             if (mBase?.isNonNullReference == true) {
                 val wrapperContext = context
@@ -1394,21 +1424,21 @@ class HprofAnalyzer {
                 val contextMatchingClassName = context.instanceClass.classHierarchy.map { it.name }
                     .firstOrNull {
                         when (it) {
-                            "android.content.ContextWrapper",
-                            "android.app.Activity",
-                            "android.app.Application",
-                            "android.app.Service"
+                            CONTEXT_WRAPPER_CLASS_NAME,
+                            ACTIVITY_CLASS_NAME,
+                            APPLICATION_CLASS_NAME,
+                            SERVICE_CLASS_NAME
                             -> true
                             else -> false
                         }
                     }
 
-                if (contextMatchingClassName == "android.app.Activity") {
+                if (contextMatchingClassName == ACTIVITY_CLASS_NAME) {
                     return context
-                } else if (contextMatchingClassName == "android.app.Service" ||
-                    contextMatchingClassName == "android.app.Application") {
+                } else if (contextMatchingClassName == SERVICE_CLASS_NAME ||
+                    contextMatchingClassName == APPLICATION_CLASS_NAME) {
                     return null
-                } else if (contextMatchingClassName == "android.content.ContextWrapper" &&
+                } else if (contextMatchingClassName == CONTEXT_WRAPPER_CLASS_NAME &&
                     context.objectId !in visitedInstances) {
                     keepUnwrapping = true
                 }

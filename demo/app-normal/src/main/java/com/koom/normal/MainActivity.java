@@ -6,10 +6,8 @@ import android.animation.ValueAnimator;
 import android.app.Dialog;
 import android.app.Fragment;
 import android.app.Service;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -95,7 +93,6 @@ public class MainActivity extends AppCompatActivity {
         addButton(layout, "Service正常使用", v -> createNormalService());
         addButton(layout, "Dialog正常使用", v -> createNormalDialog());
         addButton(layout, "Handler/Message正常使用", v -> createNormalHandlerMessage());
-        addButton(layout, "BroadcastReceiver正常使用", v -> createNormalBroadcastReceiver());
         addButton(layout, "Animator正常使用", v -> createNormalAnimator());
 
         scrollView.addView(layout);
@@ -411,42 +408,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ==================== BroadcastReceiver正常使用 ====================
-
-    private BroadcastReceiver normalReceiver;
-    
-    private void createNormalBroadcastReceiver() {
-        // 创建BroadcastReceiver
-        normalReceiver = new NormalBroadcastReceiver();
-        
-        // 正常注册
-        IntentFilter filter = new IntentFilter("com.koom.normal.TEST_ACTION");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(normalReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(normalReceiver, filter);
-        }
-        
-        // 正常注销，不添加到静态列表
-        handler.postDelayed(() -> {
-            if (normalReceiver != null) {
-                unregisterReceiver(normalReceiver);
-                normalReceiver = null;
-                showToast("正常使用BroadcastReceiver (已注销，不添加到静态列表)");
-            }
-        }, 1000);
-    }
-
-    /**
-     * 静态内部类BroadcastReceiver，不持有外部类引用
-     */
-    static class NormalBroadcastReceiver extends BroadcastReceiver {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            // 静态内部类不持有外部类引用
-        }
-    }
-
     // ==================== Animator正常使用 ====================
 
     private void createNormalAnimator() {
@@ -516,9 +477,6 @@ public class MainActivity extends AppCompatActivity {
                 break;
             case "com.koom.normal.action.HANDLER_MESSAGE":
                 createNormalHandlerMessage();
-                break;
-            case "com.koom.normal.action.BROADCAST_RECEIVER":
-                createNormalBroadcastReceiver();
                 break;
             case "com.koom.normal.action.ANIMATOR":
                 createNormalAnimator();

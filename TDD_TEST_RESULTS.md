@@ -44,41 +44,38 @@
    - 验证 `leakedHandlerMessageCount > 0`
    - 验证泄露对象列表包含 Message
 
-8. **BroadcastReceiver 泄露检测** (`testBroadcastReceiverLeakDetection`)
-   - 验证 `leakedBroadcastReceiverCount > 0`
-
-9. **Animator 泄露检测** (`testAnimatorLeakDetection`)
+8. **Animator 泄露检测** (`testAnimatorLeakDetection`)
    - 验证 `leakedAnimatorCount > 0`
    - 验证泄露对象列表包含 Animator
 
-10. **Bitmap 泄露检测** (`testBitmapLeakDetection`)
+9. **Bitmap 泄露检测** (`testBitmapLeakDetection`)
     - 验证 `leakedBitmapCount > 0`
     - 验证大对象列表包含 Bitmap
     - 验证 Bitmap 尺寸信息
 
-11. **ByteArray 泄露检测** (`testByteArrayLeakDetection`)
+10. **ByteArray 泄露检测** (`testByteArrayLeakDetection`)
     - 验证 `leakedByteArrayCount > 0`
     - 验证大对象列表包含 ByteArray
     - 验证大小 > 1MB
 
-12. **类实例统计** (`testClassStatistics`)
+11. **类实例统计** (`testClassStatistics`)
     - 验证类实例统计存在
     - 验证关键类的统计信息
 
-13. **大对象列表** (`testLargeObjectsList`)
+12. **大对象列表** (`testLargeObjectsList`)
     - 验证大对象列表存在
     - 验证大对象信息完整性
 
-14. **报告生成** (`testReportGeneration`)
+13. **报告生成** (`testReportGeneration`)
     - 验证文本报告生成
     - 验证 HTML 报告生成
     - 验证报告内容完整性
 
-15. **分析耗时统计** (`testAnalysisTimeStatistics`)
+14. **分析耗时统计** (`testAnalysisTimeStatistics`)
     - 验证过滤实例耗时统计
     - 验证查找 GC 路径耗时统计
 
-16. **综合测试** (`testAllLeakTypesDetection`)
+15. **综合测试** (`testAllLeakTypesDetection`)
     - 验证所有泄露类型都被统计
     - 验证至少有一种泄露被检测到
 
@@ -116,7 +113,7 @@ cd mem-monitor
 ./scripts/generate_test_hprof.sh fragment
 
 # 生成所有类型的测试文件
-for type in activity fragment view viewmodel service dialog handler_message broadcast_receiver animator bitmap bytearray; do
+for type in activity fragment view viewmodel service dialog handler_message animator bitmap bytearray; do
     ./scripts/generate_test_hprof.sh $type
 done
 ```
@@ -146,7 +143,7 @@ done
 ✅ Service 泄露检测通过: 检测到 1 个泄露
 ✅ Dialog 泄露检测通过: 检测到 1 个泄露
 ✅ Handler/Message 泄露检测通过: 检测到 1 个泄露
-✅ BroadcastReceiver 泄露检测通过: 检测到 1 个泄露
+（BroadcastReceiver 已移除，与 LeakCanary 对齐）
 ✅ Animator 泄露检测通过: 检测到 1 个泄露
 ✅ Bitmap 泄露检测通过: 检测到 1 个大 Bitmap
 ✅ ByteArray 泄露检测通过: 检测到 50 个大 ByteArray

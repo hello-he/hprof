@@ -23,19 +23,8 @@
 
 - **测试结果**：✅ 通过，检测到 2 个 Handler/Message 泄露
 
-### 2. BroadcastReceiver 泄露检测 ✅
-- **实现方式**：
-  - 在 `MainActivity` 中创建非静态内部类 `LeakBroadcastReceiver`
-  - 将 BroadcastReceiver 添加到静态列表 `leakedReceivers`
-  - 修复 Android 13+ 兼容性问题（添加 `RECEIVER_NOT_EXPORTED` 标志）
-  - 在 `HprofAnalyzer.kt` 中检测内部类 BroadcastReceiver
-
-- **检测逻辑**：
-  - 检测类名包含 `LeakBroadcastReceiver` 或 `LeakedBroadcastReceiverActivity` 的 BroadcastReceiver
-  - 检查 BroadcastReceiver 的 `mContext` 是否持有 Activity 引用
-  - 检查 BroadcastReceiver 是否是 Activity 的内部类
-
-- **测试结果**：✅ 通过，检测到 1 个 BroadcastReceiver 泄露
+### 2. BroadcastReceiver 泄露检测（已移除）
+- **说明**：与 LeakCanary 对齐，LeakCanary 不支持 BroadcastReceiver 泄露检测，已从分析器、Demo 与测试中移除。
 
 ## 已修复的泄露检测类型
 
@@ -67,12 +56,8 @@
    - 遍历所有 Handler 实例，检查是否是 Activity 的内部类
    - 通过 `this$0` 字段验证内部类持有外部类引用
 
-2. **增强 BroadcastReceiver 检测**：
-   - 支持检测内部类 BroadcastReceiver
-   - 检查 `mContext` 字段和内部类模式
-
-3. **改进检测模式匹配**：
-   - 支持 `LeakHandler`、`LeakBroadcastReceiver` 等命名模式
+2. **改进检测模式匹配**：
+   - 支持 `LeakHandler` 等命名模式
    - 增强内部类识别（`OuterClass$InnerClass` 格式）
 
 ### `MainActivity.java`
@@ -83,20 +68,12 @@
    }
    ```
 
-2. **新增 `LeakBroadcastReceiver` 内部类**：
-   ```java
-   class LeakBroadcastReceiver extends BroadcastReceiver {
-       // 非静态内部类，隐式持有 MainActivity 引用
-   }
-   ```
-
-3. **修复 Android 13+ 兼容性**：
+2. **修复 Android 13+ 兼容性**：
    - 添加 `Build.VERSION.SDK_INT` 检查
-   - 使用 `Context.RECEIVER_NOT_EXPORTED` 标志
+   - 使用 `Context.RECEIVER_NOT_EXPORTED` 标志（其他组件如 Handler 等）
 
-4. **修改静态列表类型**：
+3. **修改静态列表类型**：
    - `leakedMessages`: `List<Message>` → `List<Object>`
-   - `leakedReceivers`: `List<BroadcastReceiver>` → `List<Object>`
 
 ### `test_leaks.sh`
 1. **优化 Handler/Message 测试**：
@@ -111,7 +88,6 @@
 
 ### 通过的测试
 - ✅ Handler/Message 泄露检测：检测到 2 个泄露
-- ✅ BroadcastReceiver 泄露检测：检测到 1 个泄露
 - ✅ Fragment 泄露检测
 - ✅ View 泄露检测
 - ✅ Dialog 泄露检测
@@ -122,9 +98,6 @@
 ```bash
 # 测试 Handler/Message 泄露
 ./scripts/test_leaks.sh handler_message
-
-# 测试 BroadcastReceiver 泄露
-./scripts/test_leaks.sh broadcast_receiver
 
 # 运行所有测试
 ./scripts/test_leaks.sh all
@@ -137,19 +110,17 @@
    - 当内部类被静态引用持有时，即使外部类被销毁，内部类仍然持有外部类引用
 
 2. **Android 13+ 兼容性**：
-   - 动态注册 BroadcastReceiver 必须指定 `RECEIVER_EXPORTED` 或 `RECEIVER_NOT_EXPORTED`
-   - 使用 `Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU` 判断
+   - 使用 `Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU` 判断（其他组件如 Handler 等）
 
 3. **检测策略**：
-   - 直接遍历对象实例（Handler、BroadcastReceiver）
+   - 直接遍历对象实例（Handler 等）
    - 检查类名模式匹配
    - 验证字段引用关系
 
 ## 参考标准
 
-- **LeakCanary**: Handler/Message、BroadcastReceiver 检测逻辑
+- **LeakCanary**: Handler/Message 检测逻辑（LeakCanary 不支持 BroadcastReceiver）
 - **KOOM**: Fragment、Service、Bitmap 检测逻辑
-- **Android 官方文档**: BroadcastReceiver 注册要求
 
 ## 下一步工作
 
@@ -167,8 +138,7 @@
 
 ### 新增的功能
 - Handler/Message 泄露检测（直接遍历 Handler 实例）
-- BroadcastReceiver 泄露检测（内部类检测）
-- Android 13+ BroadcastReceiver 注册兼容性
+- （BroadcastReceiver 已移除，与 LeakCanary 对齐）
 
 ---
 

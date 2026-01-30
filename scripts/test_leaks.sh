@@ -235,7 +235,7 @@ analyze_heap() {
         # 将HTML内容也追加到输出文件（用于验证）
         echo "=== HTML报告内容（关键信息） ===" >> "$output_file"
         # 提取HTML中的关键信息（去除HTML标签）
-        grep -i "泄露\|leak\|统计\|Activity\|Fragment\|View\|ViewModel\|Service\|Dialog\|Handler\|Message\|BroadcastReceiver\|Animator\|Bitmap\|ByteArray" "$html_file" | \
+        grep -i "泄露\|leak\|统计\|Activity\|Fragment\|View\|ViewModel\|Service\|Dialog\|Handler\|Message\|Animator\|Bitmap\|ByteArray" "$html_file" | \
             sed 's/<[^>]*>//g' | head -50 >> "$output_file" 2>/dev/null || true
     fi
 
@@ -404,30 +404,6 @@ verify_leaks() {
             fi
         else
             print_error "未检测到Handler/Message泄露 (报告中未找到关键词)"
-            ((failed++))
-        fi
-    fi
-
-    # 检查BroadcastReceiver泄露
-    if [[ "$expected_leaks" == *"broadcast_receiver"* ]]; then
-        # 匹配格式: "   BroadcastReceiver泄露: 1 个"
-        if grep -qi "BroadcastReceiver泄露" "$output_file"; then
-            local count=$(grep -oP "BroadcastReceiver泄露[^:]*:\s*\K\d+" "$output_file" | head -1)
-            count=${count:-0}  # 如果为空则设为0
-            # 确保 count 是数字
-            if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] 2>/dev/null; then
-                print_success "检测到BroadcastReceiver泄露 (${count}个)"
-                ((passed++))
-            elif grep -qi "BroadcastReceiver泄露.*[0-9]" "$output_file"; then
-                # 如果匹配到但数字提取失败，至少确认有泄露
-                print_success "检测到BroadcastReceiver泄露"
-                ((passed++))
-            else
-                print_error "未检测到BroadcastReceiver泄露 (count=${count})"
-                ((failed++))
-            fi
-        else
-            print_error "未检测到BroadcastReceiver泄露 (报告中未找到关键词)"
             ((failed++))
         fi
     fi
@@ -769,61 +745,6 @@ test_dialog_leak() {
 }
 
 
-# 测试用例：BroadcastReceiver泄露
-test_broadcast_receiver_leak() {
-    print_test "BroadcastReceiver泄露检测"
-
-    # 先强制停止app
-    print_info "停止应用..."
-    if ! adb shell am force-stop "$PACKAGE_NAME"; then
-        print_error "停止应用失败"
-        return 1
-    fi
-    sleep 1
-
-    # 启动app并触发BroadcastReceiver泄露
-    print_info "启动app并触发BroadcastReceiver泄露..."
-    if ! adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME" -a "com.koom.leak.action.BROADCAST_RECEIVER_LEAK"; then
-        print_error "启动应用失败"
-        return 1
-    fi
-    print_success "泄露触发完成"
-
-    # 等待泄露创建完成
-    print_info "等待泄露创建完成 (3秒)..."
-    sleep 3
-
-    # BroadcastReceiver泄露现在直接在MainActivity中创建，不需要等待Activity销毁
-    # 减少等待时间，避免应用退出
-    print_info "等待泄露稳定 (2秒)..."
-    sleep 2
-
-    # 检查应用是否还在运行
-    print_info "检查应用是否还在运行..."
-    if ! adb shell pidof "$PACKAGE_NAME" > /dev/null 2>&1; then
-        print_info "应用已退出，重新启动应用..."
-        if ! adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"; then
-            print_error "重新启动应用失败"
-            return 1
-        fi
-        sleep 2
-    else
-        print_info "应用仍在运行，直接dumpheap"
-    fi
-
-    if ! dump_heap "test_broadcast_receiver_leak.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_broadcast_receiver_leak.hprof" "broadcast_receiver"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
-
 # 测试用例：Animator泄露
 test_animator_leak() {
     print_test "Animator泄露检测"
@@ -869,7 +790,6 @@ run_all_tests() {
         "test_activity_leak"
         "test_fragment_leak"
         "test_dialog_leak"
-        "test_broadcast_receiver_leak"
         "test_animator_leak"
     )
 
@@ -966,9 +886,6 @@ main() {
             dialog)
                 test_dialog_leak
                 ;;
-            broadcast_receiver)
-                test_broadcast_receiver_leak
-                ;;
             animator)
                 test_animator_leak
                 ;;
@@ -976,7 +893,7 @@ main() {
                 run_all_tests
                 ;;
             *)
-                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_threads|multiple_threads|activity|fragment|dialog|broadcast_receiver|animator|all]"
+                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_threads|multiple_threads|activity|fragment|dialog|animator|all]"
                 exit 1
                 ;;
         esac

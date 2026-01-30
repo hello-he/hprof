@@ -2,32 +2,43 @@
 mem-monitor 泄露检测功能完善 - 存档摘要
 ========================================
 
-存档日期: 2024-12-27 00:49:53
+存档日期: 2026-01-28
 工作目录: /home/dk/workspaces/koom/mem-monitor
 
 完成状态: ✅ 所有修复已完成并通过测试
 
+近期更新 (2026-01):
+- 移除 BroadcastReceiver 泄露检测，与 LeakCanary 对齐
+  - HprofAnalyzer: 移除 BROADCAST_RECEIVER 常量、broadcastReceiverClass、isBroadcastReceiver、isInnerClassOfActivity、leakedBroadcastReceiverCount 及报告中的 BroadcastReceiver 分支
+  - 测试: 移除 testBroadcastReceiverLeakDetection，综合测试中不再统计 BroadcastReceiver
+  - 文档: right-click-menu/README、COMMIT_GROUPS、TEST_GUIDE、TEST_SUMMARY、TEST_LEAKS_README、CHANGELOG_LEAK_DETECTION、README_SCRIPTS、TDD_TEST_RESULTS、ARCHIVE_SUMMARY 已同步去掉或注明移除
+  - Demo: 泄露 Demo (MainActivity) 与正常使用 Demo (app-normal MainActivity) 已去掉 BroadcastReceiver 入口与相关类
+  - 脚本: test_leaks.sh、test_normal.sh、generate_test_hprof.sh 已去掉 broadcast_receiver 用例与检查
+
 主要成果:
 1. ✅ Handler/Message 泄露检测 - 已修复并通过测试
-2. ✅ BroadcastReceiver 泄露检测 - 已修复并通过测试
-3. ✅ Fragment/View/Dialog/Animator/Service 泄露检测 - 已修复
+2. ✅ Fragment/View/Dialog/Animator/Service 泄露检测 - 已修复
+3. ✅ 与 LeakCanary 对齐：不包含 BroadcastReceiver 泄露检测
 
 关键文件:
 - HprofAnalyzer.kt: 核心分析逻辑
-- MainActivity.java: 测试用例和泄露场景
-- test_leaks.sh: 自动化测试脚本
+- demo/app MainActivity.java: 泄露测试场景（已无 BroadcastReceiver）
+- demo/app-normal MainActivity.java: 正常使用场景（已无 BroadcastReceiver）
+- scripts/test_leaks.sh, test_normal.sh, generate_test_hprof.sh: 自动化测试
 - CHANGELOG_LEAK_DETECTION.md: 详细变更日志
+- COMMIT_GROUPS.md: 提交分组说明
 
 测试验证:
 - Handler/Message: 检测到 2 个泄露 ✅
-- BroadcastReceiver: 检测到 1 个泄露 ✅
+- 以 ~/tmp/hprof/test.hprof 为输入的单元测试通过 ✅
 
-JAR文件:
-- build/libs/mem-monitor-1.0.0-all.jar (12MB) ✅
+JAR 文件:
+- build/libs/mem-monitor-1.0.0-all.jar
+- right-click-menu/mem-monitor-1.0.0-all.jar（发布包）
 
 下一步:
 - 运行完整测试套件
 - 性能优化
 - 增强报告可读性
 
-详细文档请参考: CHANGELOG_LEAK_DETECTION.md
+详细文档请参考: CHANGELOG_LEAK_DETECTION.md、COMMIT_GROUPS.md

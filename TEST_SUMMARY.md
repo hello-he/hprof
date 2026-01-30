@@ -4,7 +4,7 @@
 
 ### 1. 代码实现
 - ✅ 扩展数据模型（ClassStatistics、LargeObject）
-- ✅ 实现所有新泄露类型检测（View、ViewModel、Service、Dialog、Handler/Message、BroadcastReceiver、Animator）
+- ✅ 实现所有新泄露类型检测（View、ViewModel、Service、Dialog、Handler/Message、Animator；与 LeakCanary 对齐，不含 BroadcastReceiver）
 - ✅ 实现类实例统计和大对象列表收集
 - ✅ 增强报告生成（文本和HTML）
 - ✅ 扩展 demo APK 添加所有新泄露类型的测试案例
@@ -25,7 +25,7 @@
 
 ## 📋 测试覆盖
 
-### 泄露类型测试（15个）
+### 泄露类型测试（14个，与 LeakCanary 对齐不含 BroadcastReceiver）
 
 | 泄露类型 | 测试函数 | Intent Action | 状态 |
 |---------|---------|--------------|------|
@@ -36,7 +36,6 @@
 | Service | `test_service_leak` | `com.koom.leak.action.SERVICE_LEAK` | ✅ |
 | Dialog | `test_dialog_leak` | `com.koom.leak.action.DIALOG_LEAK` | ✅ |
 | Handler/Message | `test_handler_message_leak` | `com.koom.leak.action.HANDLER_MESSAGE_LEAK` | ✅ |
-| BroadcastReceiver | `test_broadcast_receiver_leak` | `com.koom.leak.action.BROADCAST_RECEIVER_LEAK` | ✅ |
 | Animator | `test_animator_leak` | `com.koom.leak.action.ANIMATOR_LEAK` | ✅ |
 | Bitmap | `test_bitmap_leak` | `com.koom.leak.action.BITMAP_LEAK` | ✅ |
 | ByteArray | `test_bytearray_leak` | `com.koom.leak.action.BYTEARRAY_LEAK` | ✅ |

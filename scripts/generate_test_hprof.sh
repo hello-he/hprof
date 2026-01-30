@@ -2,7 +2,7 @@
 
 # 生成测试用的 hprof 文件脚本
 # 使用方法: ./scripts/generate_test_hprof.sh <leak_type>
-# leak_type: activity, fragment, dialog, broadcast_receiver, animator, bitmap, bytearray, all
+# leak_type: activity, fragment, dialog, animator, bitmap, bytearray, all
 
 set -e
 
@@ -42,7 +42,6 @@ if [ -z "$LEAK_TYPE" ]; then
     echo "  activity           - Activity 泄露"
     echo "  fragment           - Fragment 泄露"
     echo "  dialog             - Dialog 泄露"
-    echo "  broadcast_receiver - BroadcastReceiver 泄露"
     echo "  animator           - Animator 泄露"
     echo "  bitmap             - Bitmap 泄露"
     echo "  bytearray          - ByteArray 泄露"
@@ -79,7 +78,7 @@ case $LEAK_TYPE in
         adb shell am start -a "com.koom.leak.action.FRAGMENT_LEAK" -n "$ACTIVITY_NAME"
         sleep 2
         ;;
-    dialog|broadcast_receiver|animator|bitmap|bytearray)
+    dialog|animator|bitmap|bytearray)
         echo "2. 触发 ${LEAK_TYPE} 泄露..."
         echo "   提示: 需要手动点击对应的泄露按钮"
         read -p "   按回车键继续（点击按钮后）..."

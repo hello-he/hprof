@@ -23,7 +23,6 @@ cd mem-monitor
 ./scripts/test_leaks.sh service
 ./scripts/test_leaks.sh dialog
 ./scripts/test_leaks.sh handler_message
-./scripts/test_leaks.sh broadcast_receiver
 ./scripts/test_leaks.sh animator
 ./scripts/test_leaks.sh bitmap
 ./scripts/test_leaks.sh bytearray
@@ -49,7 +48,7 @@ cd mem-monitor
 ./scripts/generate_test_hprof.sh activity
 
 # 生成所有类型的测试文件
-for type in activity fragment view viewmodel service dialog handler_message broadcast_receiver animator bitmap bytearray; do
+for type in activity fragment view viewmodel service dialog handler_message animator bitmap bytearray; do
     ./scripts/generate_test_hprof.sh $type
 done
 ```

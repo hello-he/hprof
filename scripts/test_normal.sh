@@ -267,26 +267,6 @@ verify_no_leaks() {
     fi
 
 
-    # 检查BroadcastReceiver泄露（不应该检测到）
-    if [[ "$expected_no_leaks" == *"broadcast_receiver"* ]]; then
-        if grep -qi "BroadcastReceiver泄露" "$output_file"; then
-            local count=$(grep -oP "BroadcastReceiver泄露[^:]*:\s*\K\d+" "$output_file" | head -1 || echo "0")
-            if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] 2>/dev/null; then
-                print_error "误报：检测到BroadcastReceiver泄露 (${count}个)，但这是正常使用场景"
-                ((failed++))
-            elif grep -qi "BroadcastReceiver泄露.*[0-9]" "$output_file"; then
-                print_error "误报：检测到BroadcastReceiver泄露，但这是正常使用场景"
-                ((failed++))
-            else
-                print_success "未检测到BroadcastReceiver泄露 (正常)"
-                ((passed++))
-            fi
-        else
-            print_success "未检测到BroadcastReceiver泄露 (正常)"
-            ((passed++))
-        fi
-    fi
-
     # 检查Animator泄露（不应该检测到）
     if [[ "$expected_no_leaks" == *"animator"* ]]; then
         if grep -qi "Animator泄露" "$output_file"; then
@@ -642,32 +622,6 @@ test_normal_dialog() {
 }
 
 
-# 测试用例：BroadcastReceiver正常使用
-test_normal_broadcast_receiver() {
-    print_test "BroadcastReceiver正常使用（不应该检测到泄露）"
-
-    if ! trigger_normal "com.koom.normal.action.BROADCAST_RECEIVER" "BroadcastReceiver正常使用"; then
-        print_error "触发场景失败"
-        return 1
-    fi
-
-    # 等待BroadcastReceiver正常注销
-    print_info "等待 BroadcastReceiver 正常注销 (额外 2 秒)..."
-    sleep 2
-
-    if ! dump_heap "test_normal_broadcast_receiver.hprof"; then
-        print_error "dump heap 失败"
-        return 1
-    fi
-
-    if ! analyze_heap "$TEST_OUTPUT_DIR/test_normal_broadcast_receiver.hprof" "broadcast_receiver"; then
-        print_error "分析失败"
-        return 1
-    fi
-
-    return 0
-}
-
 # 测试用例：Animator正常使用
 test_normal_animator() {
     print_test "Animator正常使用（不应该检测到泄露）"
@@ -710,7 +664,6 @@ run_all_tests() {
         "test_normal_activity"
         "test_normal_fragment"
         "test_normal_dialog"
-        "test_normal_broadcast_receiver"
         "test_normal_animator"
     )
 
@@ -773,7 +726,7 @@ main() {
     check_jar
 
     if [ $# -eq 0 ]; then
-        echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_thread|multiple_threads|activity|fragment|dialog|broadcast_receiver|animator|all]"
+        echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_thread|multiple_threads|activity|fragment|dialog|animator|all]"
         exit 1
     fi
 
@@ -806,9 +759,6 @@ main() {
             dialog)
                 test_normal_dialog
                 ;;
-            broadcast_receiver)
-                test_normal_broadcast_receiver
-                ;;
             animator)
                 test_normal_animator
                 ;;
@@ -816,7 +766,7 @@ main() {
                 run_all_tests
                 ;;
             *)
-                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_thread|multiple_threads|activity|fragment|dialog|broadcast_receiver|animator|all]"
+                echo "用法: $0 [bitmap|multiple_bitmap|huge_bitmap|bytearray|duplicate_thread|multiple_threads|activity|fragment|dialog|animator|all]"
                 exit 1
                 ;;
         esac

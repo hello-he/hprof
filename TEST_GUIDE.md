@@ -11,7 +11,6 @@
 ├── activity_leak.hprof          # Activity 泄露测试
 ├── fragment_leak.hprof          # Fragment 泄露测试
 ├── dialog_leak.hprof            # Dialog 泄露测试
-├── broadcast_receiver_leak.hprof # BroadcastReceiver 泄露测试
 ├── animator_leak.hprof          # Animator 泄露测试
 ├── bitmap_leak.hprof            # Bitmap 泄露测试
 ├── bytearray_leak.hprof         # ByteArray 泄露测试
@@ -94,24 +93,7 @@ adb pull /sdcard/dialog_leak.hprof ~/tmp/hprof/
 adb shell rm /sdcard/dialog_leak.hprof
 ```
 
-#### 2.4 BroadcastReceiver 泄露
-
-```bash
-# 1. 启动 demo APK
-adb shell am start -n com.koom.leak/.MainActivity
-
-# 2. 触发 BroadcastReceiver 泄露（点击"BroadcastReceiver泄露"按钮）
-adb shell input tap <x> <y>
-
-# 3. Dump hprof（使用 -g 触发 GC，-b png 包含 Bitmap 数据）
-adb shell am dumpheap -g -b png com.koom.leak /sdcard/broadcast_receiver_leak.hprof
-
-# 4. 拉取文件
-adb pull /sdcard/broadcast_receiver_leak.hprof ~/tmp/hprof/
-adb shell rm /sdcard/broadcast_receiver_leak.hprof
-```
-
-#### 2.5 Animator 泄露
+#### 2.4 Animator 泄露
 
 ```bash
 # 1. 启动 demo APK
@@ -226,9 +208,8 @@ Thread.sleep(1000)
 1. **Activity 泄露测试**：需要退出 app 后重新打开，确保旧的 Activity 被销毁但仍被引用
 2. **Fragment 泄露测试**：需要等待 Fragment 被移除（约 500ms）
 3. **Dialog 泄露测试**：需要等待 Dialog 被关闭
-4. **BroadcastReceiver 泄露测试**：需要确保 BroadcastReceiver 已注册但未注销
-5. **Animator 泄露测试**：需要等待 Animator 开始运行
-6. **Bitmap 泄露测试**：确保使用 `-g -b png` 参数 dump hprof 以包含 Bitmap 数据
+4. **Animator 泄露测试**：需要等待 Animator 开始运行
+5. **Bitmap 泄露测试**：确保使用 `-g -b png` 参数 dump hprof 以包含 Bitmap 数据
 
 ## 验证测试结果
 

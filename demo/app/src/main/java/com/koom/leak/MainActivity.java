@@ -19,8 +19,6 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import android.content.Context;
 import android.content.Intent;
-import android.content.BroadcastReceiver;
-import android.content.IntentFilter;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.animation.Animator;
@@ -57,7 +55,6 @@ public class MainActivity extends AppCompatActivity {
     private static List<Drawable> drawableLeakList = new ArrayList<>();
     private static List<FragmentHolder> fragmentLeakList = new ArrayList<>();
     private static List<Dialog> leakedDialogs = new ArrayList<>();
-    private static List<Object> leakedReceivers = new ArrayList<>();  // 用于持有BroadcastReceiver引用
     private static List<Animator> leakedAnimators = new ArrayList<>();
     
     // 递增式泄露计数器（用于测试 watch 功能）
@@ -112,7 +109,6 @@ public class MainActivity extends AppCompatActivity {
                 "  ✅ Activity泄露 (已销毁但被引用)\n" +
                 "  ✅ Fragment泄露 (已销毁但被引用)\n" +
                 "  ✅ Dialog泄露 (已关闭但被引用)\n" +
-                "  ✅ BroadcastReceiver泄露 (已注册但未注销)\n" +
                 "  ✅ Animator泄露 (无限循环持有引用)\n" +
                 "  ✅ 大Bitmap (像素>1M)\n" +
                 "  ✅ 大ByteArray (大小>1MB)\n" +
@@ -166,10 +162,9 @@ public class MainActivity extends AppCompatActivity {
         addLeakButton(layout, "🔥 Activity泄露 (可被检测)", v -> createActivityLeakAndExit());
         addLeakButton(layout, "🔥 Fragment泄露 (可被检测)", v -> createFragmentLeak());
 
-        // ========== Dialog/BroadcastReceiver/Animator泄露 ==========
-        addSectionTitle(layout, "🖼️ Dialog/BroadcastReceiver/Animator泄露");
+        // ========== Dialog/Animator泄露 ==========
+        addSectionTitle(layout, "🖼️ Dialog/Animator泄露");
         addLeakButton(layout, "🔥 Dialog泄露 (可被检测)", v -> createDialogLeak());
-        addLeakButton(layout, "🔥 BroadcastReceiver泄露 (可被检测)", v -> createBroadcastReceiverLeak());
         addLeakButton(layout, "🔥 Animator泄露 (可被检测)", v -> createAnimatorLeak());
 
         // ========== 递增式泄露（用于测试 watch 功能）==========
@@ -949,93 +944,6 @@ public class MainActivity extends AppCompatActivity {
         showToast("创建Dialog泄露");
     }
 
-    // ==================== BroadcastReceiver泄露 ====================
-
-    /**
-     * 创建BroadcastReceiver泄露
-     * 直接在MainActivity中创建非静态内部类BroadcastReceiver，持有MainActivity引用
-     * 将BroadcastReceiver添加到静态列表，确保不被回收
-     */
-    private void createBroadcastReceiverLeak() {
-        // 创建非静态内部类BroadcastReceiver（隐式持有MainActivity引用）
-        // 类名格式：com.koom.leak.MainActivity$LeakBroadcastReceiver
-        LeakBroadcastReceiver leakReceiver = new LeakBroadcastReceiver();
-        
-        // 将BroadcastReceiver添加到静态列表
-        leakedReceivers.add(leakReceiver);
-        
-            // 注册BroadcastReceiver（但不会注销，造成泄露）
-            // Android 13+ 要求指定 RECEIVER_NOT_EXPORTED 标志
-            IntentFilter filter = new IntentFilter("com.koom.leak.TEST_ACTION");
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(leakReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-            } else {
-                registerReceiver(leakReceiver, filter);
-            }
-        
-        leakBatchCount++;
-        updateStatus();
-        showToast("创建BroadcastReceiver泄露\n已创建非静态内部类BroadcastReceiver，持有Activity引用");
-    }
-    
-    /**
-     * 非静态内部类BroadcastReceiver，隐式持有外部类（MainActivity）引用
-     */
-    class LeakBroadcastReceiver extends BroadcastReceiver {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            // BroadcastReceiver持有MainActivity引用（通过非静态内部类）
-        }
-    }
-    
-    /**
-     * 用于测试BroadcastReceiver泄露的Activity
-     * 参考LeakCanary：注册BroadcastReceiver但未注销，BroadcastReceiver的mContext持有Activity引用
-     */
-    public static class LeakedBroadcastReceiverActivity extends AppCompatActivity {
-        // 静态列表，用于持有BroadcastReceiver引用
-        private static List<Object> receiverLeakList;
-        
-        public static void setReceiverLeakList(List<Object> list) {
-            receiverLeakList = list;
-        }
-        
-        // 非静态内部类BroadcastReceiver，隐式持有Activity引用
-        // 注意：匿名内部类BroadcastReceiver的类名格式为：OuterClass$数字（如：LeakedBroadcastReceiverActivity$1）
-        private BroadcastReceiver leakReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                // BroadcastReceiver持有Activity引用（通过非静态内部类）
-                // mContext也会持有Activity引用
-            }
-        };
-        
-        @Override
-        protected void onCreate(Bundle savedInstanceState) {
-            super.onCreate(savedInstanceState);
-            
-            // 将BroadcastReceiver添加到静态列表（确保不被回收）
-            if (receiverLeakList != null) {
-                receiverLeakList.add(leakReceiver);
-            }
-            
-            // 注册BroadcastReceiver但未注销（造成泄露）
-            // BroadcastReceiver的mContext会持有Activity引用
-            IntentFilter filter = new IntentFilter("com.koom.leak.TEST_ACTION");
-            registerReceiver(leakReceiver, filter);
-            
-            // 延迟finish，先返回MainActivity，确保应用不退出
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                // 返回MainActivity
-                Intent intent = new Intent(this, MainActivity.class);
-                intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                startActivity(intent);
-                // 然后finish（不调用unregisterReceiver，让BroadcastReceiver泄露）
-                finish();
-            }, 500);
-        }
-    }
-
     // ==================== Animator泄露 ====================
 
     /**
@@ -1178,7 +1086,7 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 创建递增式泄露（通用方法，已废弃，保留用于兼容）
      * 每次调用都会创建新的泄露对象，用于测试 watch 模式的内存监控功能
-     * 创建多种类型的泄露：Bitmap、Dialog、BroadcastReceiver、Animator
+     * 创建多种类型的泄露：Bitmap、Dialog、Animator
      */
     private void createIncrementalLeak() {
         incrementalLeakCount++;
@@ -1196,17 +1104,7 @@ public class MainActivity extends AppCompatActivity {
         dialog.dismiss();
         leakedDialogs.add(dialog);
         
-        // 3. 创建 BroadcastReceiver 泄露
-        LeakBroadcastReceiver leakReceiver = new LeakBroadcastReceiver();
-        leakedReceivers.add(leakReceiver);
-        IntentFilter filter = new IntentFilter("com.koom.leak.TEST_ACTION_" + incrementalLeakCount);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(leakReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(leakReceiver, filter);
-        }
-        
-        // 4. 创建 Animator 泄露
+        // 3. 创建 Animator 泄露
         View view = new View(this);
         ObjectAnimator animator = ObjectAnimator.ofFloat(view, "alpha", 0f, 1f);
         animator.setRepeatCount(ValueAnimator.INFINITE);
@@ -1220,7 +1118,7 @@ public class MainActivity extends AppCompatActivity {
         // 更新提示文字
         TextView incrementalTipText = findViewById(android.R.id.text1);
         if (incrementalTipText != null) {
-            incrementalTipText.setText("💡 说明：每次点击都会创建新的泄露对象（Bitmap、Dialog、BroadcastReceiver、Animator），\n" +
+            incrementalTipText.setText("💡 说明：每次点击都会创建新的泄露对象（Bitmap、Dialog、Animator），\n" +
                     "   用于测试 watch 模式的内存监控功能。当前泄露批次: " + incrementalLeakCount);
         }
         
@@ -1228,7 +1126,7 @@ public class MainActivity extends AppCompatActivity {
         long usedMemory = runtime.totalMemory() - runtime.freeMemory();
         long usedMemoryMB = usedMemory / (1024 * 1024);
         showToast("创建递增式泄露 #" + incrementalLeakCount + "\n" +
-                "已创建: Bitmap、Dialog、BroadcastReceiver、Animator\n" +
+                "已创建: Bitmap、Dialog、Animator\n" +
                 "当前内存: " + usedMemoryMB + " MB");
     }
 
@@ -1298,7 +1196,6 @@ public class MainActivity extends AppCompatActivity {
      * - com.koom.leak.action.FRAGMENT_LEAK
      * - com.koom.leak.action.ACTIVITY_LEAK_AND_EXIT
      * - com.koom.leak.action.DIALOG_LEAK
-     * - com.koom.leak.action.BROADCAST_RECEIVER_LEAK
      * - com.koom.leak.action.ANIMATOR_LEAK
      * - com.koom.leak.action.INCREMENTAL_LEAK
      * - com.koom.leak.action.HEAP_MEMORY_LEAK
@@ -1361,10 +1258,6 @@ public class MainActivity extends AppCompatActivity {
             case "com.koom.leak.action.DIALOG_LEAK":
                 createDialogLeak();
                 showToast("已触发Dialog泄露");
-                break;
-            case "com.koom.leak.action.BROADCAST_RECEIVER_LEAK":
-                createBroadcastReceiverLeak();
-                showToast("已触发BroadcastReceiver泄露");
                 break;
             case "com.koom.leak.action.ANIMATOR_LEAK":
                 createAnimatorLeak();

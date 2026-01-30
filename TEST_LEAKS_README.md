@@ -49,8 +49,7 @@ cd mem-monitor
 # Handler/Message 泄露测试
 ./scripts/test_leaks.sh handler_message
 
-# BroadcastReceiver 泄露测试
-./scripts/test_leaks.sh broadcast_receiver
+# （BroadcastReceiver 已移除，与 LeakCanary 对齐）
 
 # Animator 泄露测试
 ./scripts/test_leaks.sh animator
@@ -73,7 +72,6 @@ cd mem-monitor
 | Service 泄露 | `service` | 测试已停止的 Service 仍被引用 |
 | Dialog 泄露 | `dialog` | 测试已关闭的 Dialog 仍被引用 |
 | Handler/Message 泄露 | `handler_message` | 测试 Message.obj 持有已销毁对象 |
-| BroadcastReceiver 泄露 | `broadcast_receiver` | 测试已注册但未注销的 Receiver |
 | Animator 泄露 | `animator` | 测试无限循环的 Animator 持有引用 |
 | Bitmap 泄露 | `bitmap` | 测试大 Bitmap (>1M像素) |
 | ByteArray 泄露 | `bytearray` | 测试大 ByteArray (>1MB) |

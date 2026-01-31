@@ -35,7 +35,8 @@ echo ""
 echo "2. 检查应用是否安装..."
 if ! adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
     echo "   应用未安装，正在安装..."
-    adb install -r /home/dk/workspaces/koom/mem-monitor/demo/app/build/outputs/apk/debug/app-debug.apk
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    adb install -r "$SCRIPT_DIR/../demo/app/build/outputs/apk/debug/app-debug.apk"
 else
     echo "   应用已安装"
 fi

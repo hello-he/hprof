@@ -10,7 +10,7 @@
 
 **使用方法**：
 ```bash
-cd mem-monitor
+cd mem-analyze
 
 # 运行所有测试
 ./scripts/test_leaks.sh all
@@ -42,7 +42,7 @@ cd mem-monitor
 
 **使用方法**：
 ```bash
-cd mem-monitor
+cd mem-analyze
 
 # 生成 Activity 泄露测试文件
 ./scripts/generate_test_hprof.sh activity
@@ -58,21 +58,22 @@ done
 所有脚本统一放在 `scripts/` 目录：
 
 ```
-mem-monitor/
+mem-analyze/
 └── scripts/
-    ├── test_leaks.sh              # 自动化测试脚本（主要）
+    ├── test_leaks.sh              # 自动化泄露测试（主要）
     ├── generate_test_hprof.sh     # 生成测试数据
     ├── monkey_test.sh             # Monkey 测试
-    ├── run_test.sh                # 运行测试
-    └── watch_test.sh              # 监控测试
+    └── run_test.sh                # 综合测试（device-watch + Monkey）
 ```
+
+设备端监控脚本在 `device-watch/` 目录，见 [device-watch/README.md](device-watch/README.md)。
 
 ## 路径说明
 
 脚本会自动处理路径问题：
 - `SCRIPT_DIR`: 脚本所在目录（`scripts/`）
-- `PROJECT_DIR`: 项目根目录（`mem-monitor/`）
-- `JAR_PATH`: JAR 文件路径（`$PROJECT_DIR/build/libs/mem-monitor-1.0.0-all.jar`）
+- `PROJECT_DIR`: 项目根目录（`mem-analyze/`）
+- `JAR_PATH`: JAR 文件路径（`$PROJECT_DIR/build/libs/mem-analyze-1.0.0-all.jar`）
 
 脚本会：
 1. 自动检测 JAR 文件是否存在

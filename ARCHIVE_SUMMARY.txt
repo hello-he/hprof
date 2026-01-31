@@ -1,13 +1,15 @@
 ========================================
-mem-monitor 泄露检测功能完善 - 存档摘要
+mem-analyze 泄露检测功能完善 - 存档摘要
 ========================================
 
-存档日期: 2026-01-28
-工作目录: /home/dk/workspaces/koom/mem-monitor
+存档日期: 2026-01-31
+工作目录: /home/dk/workspaces/koom/mem-analyze
 
 完成状态: ✅ 所有修复已完成并通过测试
 
 近期更新 (2026-01):
+- 项目更名为 mem-analyze：settings/build、脚本、文档、右键菜单、device-watch 全部改为 mem-analyze；JAR 输出 mem-analyze-1.0.0-all.jar
+- 移除 scan/watch 功能：删除 ScanCommand、WatchCommand、AdbClient、MonitorConfig、MetricsSnapshot、ThresholdTracker；监控推荐使用 device-watch（设备端，无需持续连 adb）
 - 移除 BroadcastReceiver 泄露检测，与 LeakCanary 对齐
   - HprofAnalyzer: 移除 BROADCAST_RECEIVER 常量、broadcastReceiverClass、isBroadcastReceiver、isInnerClassOfActivity、leakedBroadcastReceiverCount 及报告中的 BroadcastReceiver 分支
   - 测试: 移除 testBroadcastReceiverLeakDetection，综合测试中不再统计 BroadcastReceiver
@@ -33,8 +35,8 @@ mem-monitor 泄露检测功能完善 - 存档摘要
 - 以 ~/tmp/hprof/test.hprof 为输入的单元测试通过 ✅
 
 JAR 文件:
-- build/libs/mem-monitor-1.0.0-all.jar
-- right-click-menu/mem-monitor-1.0.0-all.jar（发布包）
+- build/libs/mem-analyze-1.0.0-all.jar
+- right-click-menu/mem-analyze-1.0.0-all.jar（发布包）
 
 下一步:
 - 运行完整测试套件

@@ -4,7 +4,7 @@
 2024-12-27
 
 ## 概述
-完善了 mem-monitor 工具的 hprof 分析能力，新增并修复了多种泄露类型的检测，参考了 LeakCanary 和 KOOM 的实现标准。
+完善了 mem-analyze 工具的 hprof 分析能力，新增并修复了多种泄露类型的检测，参考了 LeakCanary 和 KOOM 的实现标准。
 
 ## 新增泄露检测类型
 

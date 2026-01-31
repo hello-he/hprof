@@ -7,8 +7,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RIGHT_CLICK_DIR="$PROJECT_ROOT/right-click-menu"
-BUILD_JAR="$PROJECT_ROOT/build/libs/mem-monitor-1.0.0-all.jar"
-TARGET_JAR="$RIGHT_CLICK_DIR/mem-monitor-1.0.0-all.jar"
+BUILD_JAR="$PROJECT_ROOT/build/libs/mem-analyze-1.0.0-all.jar"
+TARGET_JAR="$RIGHT_CLICK_DIR/mem-analyze-1.0.0-all.jar"
 
 echo "📦 打包右键菜单发布包..."
 echo ""

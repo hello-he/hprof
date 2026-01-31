@@ -5,8 +5,8 @@ set -e
 
 # 获取脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ANALYZE_SCRIPT="$SCRIPT_DIR/mem-monitor-analyze.sh"
-JAR_FILE="$SCRIPT_DIR/mem-monitor-1.0.0-all.jar"
+ANALYZE_SCRIPT="$SCRIPT_DIR/mem-analyze.sh"
+JAR_FILE="$SCRIPT_DIR/mem-analyze-1.0.0-all.jar"
 
 # 检查必要文件是否存在
 if [ ! -f "$ANALYZE_SCRIPT" ]; then
@@ -31,23 +31,23 @@ mkdir -p ~/.local/share/mime/packages
 
 # 复制脚本和jar文件到 ~/.local/bin
 echo "安装分析脚本..."
-cp "$ANALYZE_SCRIPT" ~/.local/bin/mem-monitor-analyze.sh
-chmod +x ~/.local/bin/mem-monitor-analyze.sh
+cp "$ANALYZE_SCRIPT" ~/.local/bin/mem-analyze.sh
+chmod +x ~/.local/bin/mem-analyze.sh
 
 echo "安装jar文件..."
-cp "$JAR_FILE" ~/.local/bin/mem-monitor-1.0.0-all.jar
+cp "$JAR_FILE" ~/.local/bin/mem-analyze-1.0.0-all.jar
 
 # 创建桌面文件
 echo "创建桌面快捷方式..."
-cat > ~/.local/share/applications/mem-monitor-analyze.desktop <<EOF
+cat > ~/.local/share/applications/mem-analyze.desktop <<EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=分析内存泄露
 Name[en]=Analyze Memory Leak
-Comment=使用 mem-monitor 分析 hprof 文件
-Comment[en]=Analyze hprof file with mem-monitor
-Exec=$HOME/.local/bin/mem-monitor-analyze.sh %f
+Comment=使用 mem-analyze 分析 hprof 文件
+Comment[en]=Analyze hprof file with mem-analyze
+Exec=$HOME/.local/bin/mem-analyze.sh %f
 Icon=utilities-system-monitor
 Terminal=false
 Categories=Development;System;

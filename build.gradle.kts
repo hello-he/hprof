@@ -36,9 +36,6 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.9")
     implementation("ch.qos.logback:logback-classic:1.4.14")
 
-    // Kotlin协程
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-
     // 测试
     testImplementation("org.jetbrains.kotlin:kotlin-test:1.9.22")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:1.9.22")
@@ -62,6 +59,7 @@ tasks {
     }
 
     shadowJar {
+        archiveBaseName.set("mem-analyze")
         manifest {
             attributes("Main-Class" to "com.koom.monitor.MainKt")
         }

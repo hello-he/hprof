@@ -1,6 +1,6 @@
-# Android Memory Monitor - 快速开始
+# Android Memory Analyze (mem-analyze) - 快速开始
 
-快速监控和分析Android应用的内存问题。
+快速分析 Android 应用内存泄露：**离线分析 hprof** + **设备端监控**（device-watch，无需持续连 adb）。
 
 ## Demo APK 支持的泄露类型
 
@@ -8,20 +8,10 @@
 |------|---------|---------|
 | 📸 Bitmap | 1440x3200 Bitmap | ~18MB |
 | 📸 Bitmap | 1920x1080 x10 | ~80MB |
-| 📸 Bitmap | 2560x2560 超大 | ~26MB |
 | 📦 ByteArray | 1MB x50 | 50MB |
-| 📦 String | 1MB | ~1MB |
-| 📦 IntArray | 4MB x10 | 40MB |
-| 📦 LongArray | 8MB x10 | 80MB |
-| 🧵 Thread | 10个长期线程 | 持续增长 |
-| 🧵 Runnable | Handler持有 | 延迟释放 |
-| 🧵 Timer | 未取消 | 持续运行 |
-| 🏠 Activity | 静态引用 | 无法GC |
-| 🏠 Context | 单例持有 | 无法GC |
-| 🔧 内部类 | 非静态/匿名 | 持有外部引用 |
-| 🔌 资源 | InputStream/Drawable | 未关闭 |
-| 📚 集合 | ArrayList/静态集合 | 持续增长 |
-| 🔄 循环引用 | 双向引用 | 无法GC |
+| 🧵 Thread / Runnable / Timer | 多种 | 持续增长 |
+| 🏠 Activity / Context | 静态引用、单例持有 | 无法 GC |
+| 🔧 内部类 / 资源 / 集合 / 循环引用 | 多种 | 见 Demo |
 
 ## 一分钟快速开始
 
@@ -31,93 +21,79 @@
 ./gradlew shadowJar
 ```
 
-### 2. 监控应用
+### 2. 设备端监控（推荐）
+
+部署 device-watch 到设备后，在设备上运行监控，可拔掉 USB：
 
 ```bash
-# 终端1：启动监控（设置低阈值便于测试）
-java -jar build/libs/mem-monitor-1.0.0-all.jar watch \
-  -p com.example.app \
-  --heap-threshold 100
+cd device-watch
+./deploy-device-watch.sh
+adb shell "nohup sh /data/local/tmp/device-watch.sh -p com.example.app > /data/local/tmp/watch.log 2>&1 &"
 ```
+
+查看是否正常：`adb shell cat /data/local/tmp/watch.log`
 
 ### 3. 触发内存问题
 
 ```bash
-# 终端2：运行Monkey让应用产生内存压力
 adb shell monkey -p com.example.app 5000
 ```
 
-### 4. 查看报告
+### 4. 分析 Hprof 文件
 
-当超过阈值时，工具会自动：
-- Dump堆内存到 `reports/` 目录
-- 截图保存现场
-
-## 分析Hprof文件
+从设备拉取 dump 出的 hprof 后，在本机分析：
 
 ```bash
-java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof
+java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof
 ```
 
-工具会自动检测hprof文件是否包含Bitmap数据（来自 `am dumpheap -g -b png`），如果包含则自动提取并生成报告。
+工具会自动检测 hprof 是否包含 Bitmap 数据（来自 `am dumpheap -g -b png`），若包含则自动提取并生成报告。
 
 **参数说明**：
-- `-g`: 在 dump 前触发 GC，获得更准确的内存快照
+- `-g`: dump 前触发 GC，获得更准确快照
 - `-b png`: 包含 Bitmap 数据（Android 14+）
-
-输出：`reports/heap.hprof/bitmap_analysis.html` - 在浏览器中打开查看
 
 ## 常用命令
 
 ```bash
-# 扫描应用内存状态
-java -jar build/libs/mem-monitor-1.0.0-all.jar scan -p com.example.app
+# 离线分析
+java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof
 
-# 只提取大Bitmap
-java -jar build/libs/mem-monitor-1.0.0-all.jar analyze -f heap.hprof --large-only
+# 只提取大 Bitmap
+java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof --large-only
 
-# 使用测试APK验证监控功能
-cd demo && ./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-java -jar build/libs/mem-monitor-1.0.0-all.jar watch -p com.koom.leak --heap-threshold 50
+# 综合测试（device-watch + Monkey）
+bash scripts/run_test.sh
 ```
 
 ## 测试脚本
 
 ```bash
-# 自动Monkey测试
+# Monkey 测试
 bash scripts/monkey_test.sh
 
-# 自动Watch监控
-bash scripts/watch_test.sh
-
-# 同时运行（需要tmux）
+# 综合测试（设备端监控 + Monkey）
 bash scripts/run_test.sh
+
+# 泄露自动化测试
+./scripts/test_leaks.sh all
 ```
 
 ## 输出说明
 
 ```
 reports/
-├── test.hprof/              # 按hprof文件名分目录
-│   ├── hprof_analysis.html   # 内存泄漏分析报告
-│   ├── bitmaps/              # 提取的Bitmap图片
-│   └── bitmap_analysis.html  # Bitmap重复检测报告
+├── test.hprof/
+│   ├── hprof_analysis.html   # 泄露分析报告
+│   ├── bitmaps/              # 提取的 Bitmap 图片
+│   └── bitmap_analysis.html # Bitmap 重复检测（存在时）
 ```
-
-## 阈值建议
-
-| 指标 | 警告阈值 | 危险阈值 |
-|------|---------|---------|
-| 堆内存 | 200MB | 512MB |
-| 线程数 | 200 | 300 |
-| 文件句柄 | 300 | 500 |
 
 ## 系统要求
 
 - JDK 17+
 - Android 5.0+ (API 21+)
-- ADB已配置
-- Android 14+ 支持Bitmap图片提取
+- 设备端监控：部署时需 adb；运行后可不连 USB
+- Android 14+ 支持 Bitmap 图片提取
 
-详细文档请查看 [README.md](README.md)
+详细文档请查看 [README.md](README.md)、[DEVICE_WATCH.md](DEVICE_WATCH.md)。

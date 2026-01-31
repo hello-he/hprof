@@ -18,8 +18,8 @@ PACKAGE_NAME="com.koom.leak"
 ACTIVITY_NAME="com.koom.leak.MainActivity"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-JAR_PATH="$PROJECT_DIR/build/libs/mem-monitor-1.0.0-all.jar"
-TEST_OUTPUT_DIR="/tmp/mem-monitor-test"
+JAR_PATH="$PROJECT_DIR/build/libs/mem-analyze-1.0.0-all.jar"
+TEST_OUTPUT_DIR="/tmp/mem-analyze-test"
 DEVICE_HPROF_DIR="/data/local/tmp"
 
 # 检查并构建JAR文件
@@ -32,7 +32,7 @@ check_jar() {
         local gradlew_path="$PROJECT_DIR/gradlew"
         if [ ! -f "$gradlew_path" ]; then
             print_error "gradlew 不存在: $gradlew_path"
-            print_error "请确保在 mem-monitor 项目根目录下运行此脚本"
+            print_error "请确保在 mem-analyze 项目根目录下运行此脚本"
             cd "$original_dir"
             exit 1
         fi

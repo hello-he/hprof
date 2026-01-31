@@ -596,7 +596,6 @@ public class MainActivity extends AppCompatActivity {
         drawableLeakList.clear();
         fragmentLeakList.clear();
         leakedDialogs.clear();
-        leakedReceivers.clear();
         leakedAnimators.clear();
         
         // 重置递增式泄露计数器

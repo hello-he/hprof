@@ -16,12 +16,12 @@
 
 - Android 设备已连接并开启 USB 调试
 - 已安装 demo APK
-- 已构建 mem-monitor JAR 文件（脚本会自动构建）
+- 已构建 mem-analyze JAR 文件（脚本会自动构建）
 
 ### 2. 运行所有测试
 
 ```bash
-cd mem-monitor
+cd mem-analyze
 ./scripts/test_leaks.sh all
 ```
 
@@ -87,15 +87,15 @@ cd mem-monitor
 4. **等待泄露创建** - 等待泄露对象创建完成
 5. **Dump Heap** - 自动执行 `adb shell am dumpheap -g -b png`（-g 触发 GC，-b png 包含 Bitmap 数据）
 6. **拉取文件** - 自动从设备拉取 hprof 文件
-7. **分析文件** - 自动运行 mem-monitor 分析
+7. **分析文件** - 自动运行 mem-analyze 分析
 8. **验证结果** - 自动验证检测结果是否符合预期
 
 ## 输出文件
 
-所有测试文件保存在 `/tmp/mem-monitor-test/` 目录：
+所有测试文件保存在 `/tmp/mem-analyze-test/` 目录：
 
 ```
-/tmp/mem-monitor-test/
+/tmp/mem-analyze-test/
 ├── test_activity_leak.hprof              # Activity 泄露的 hprof 文件
 ├── test_fragment_leak.hprof              # Fragment 泄露的 hprof 文件
 ├── test_view_leak.hprof                  # View 泄露的 hprof 文件
@@ -126,9 +126,9 @@ cd mem-monitor
 ✓ 设备已连接
 ➜ 启动app并触发Activity泄露...
 ➜ 执行dumpheap: test_activity_leak.hprof
-✓ hprof文件已保存到: /tmp/mem-monitor-test/test_activity_leak.hprof
-➜ 分析hprof文件: /tmp/mem-monitor-test/test_activity_leak.hprof
-➜ 执行命令: java -jar .../mem-monitor-1.0.0-all.jar analyze --hprof="..." --output="..."
+✓ hprof文件已保存到: /tmp/mem-analyze-test/test_activity_leak.hprof
+➜ 分析hprof文件: /tmp/mem-analyze-test/test_activity_leak.hprof
+➜ 执行命令: java -jar .../mem-analyze-1.0.0-all.jar analyze --hprof="..." --output="..."
 ✓ 分析完成
 ➜ 验证泄露检测结果...
 ✓ 检测到Activity泄露 (1个)
@@ -156,7 +156,7 @@ cd mem-monitor
 
 **解决**：
 ```bash
-cd mem-monitor/demo
+cd mem-analyze/demo
 ./gradlew installDebug
 ```
 
@@ -164,7 +164,7 @@ cd mem-monitor/demo
 
 脚本会自动构建，如果构建失败：
 ```bash
-cd mem-monitor
+cd mem-analyze
 ./gradlew shadowJar
 ```
 
@@ -172,7 +172,7 @@ cd mem-monitor
 
 查看详细日志：
 ```bash
-cat /tmp/mem-monitor-test/analysis_result_*.txt
+cat /tmp/mem-analyze-test/analysis_result_*.txt
 ```
 
 ### 问题：检测不到泄露
@@ -207,7 +207,7 @@ TEST_OUTPUT_DIR="/path/to/custom/output"
 
 ```bash
 #!/bin/bash
-cd mem-monitor
+cd mem-analyze
 ./scripts/test_leaks.sh all 2>&1 | tee test_results.log
 ```
 
@@ -223,7 +223,7 @@ cd mem-monitor
 ```bash
 # 复制测试文件到单元测试期望的位置
 mkdir -p ~/tmp/hprof
-cp /tmp/mem-monitor-test/test_*.hprof ~/tmp/hprof/
+cp /tmp/mem-analyze-test/test_*.hprof ~/tmp/hprof/
 
 # 重命名以匹配单元测试期望的文件名
 mv ~/tmp/hprof/test_activity_leak.hprof ~/tmp/hprof/activity_leak.hprof
@@ -231,7 +231,7 @@ mv ~/tmp/hprof/test_fragment_leak.hprof ~/tmp/hprof/fragment_leak.hprof
 # ... 等等
 
 # 运行单元测试
-cd mem-monitor
+cd mem-analyze
 ./gradlew test --tests HprofAnalyzerLeakDetectionTest
 ```
 
@@ -243,7 +243,7 @@ cd mem-monitor
 # GitHub Actions 示例
 - name: Run Leak Detection Tests
   run: |
-    cd mem-monitor
+    cd mem-analyze
     ./test_leaks.sh all
 ```
 

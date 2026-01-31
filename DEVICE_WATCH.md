@@ -1,17 +1,17 @@
 # 设备端内存监控
 
-本文档介绍如何在 Android 设备上直接运行内存监控，无需持续连接 PC。
+本文档介绍如何在 Android 设备上直接运行内存监控，**无需持续连接 PC**。
 
 ## 概述
 
-传统的 `watch` 命令需要通过 PC 端的 adb 连接来执行监控。设备端监控提供了另一种方式：
+本项目的监控能力以**设备端监控（device-watch）**为主：将监控脚本部署到设备上，在设备上独立运行，超阈值自动 dump hprof，之后可将 hprof 拉取到 PC 用 `analyze` 分析。
 
-- 将监控脚本部署到设备上
-- 在设备上独立运行监控
+- 将监控脚本部署到设备上（`deploy-device-watch.sh`）
+- 在设备上独立运行监控（可拔掉 USB）
 - 当内存超过阈值时自动 dump hprof
-- 之后再将 hprof 文件拉取到 PC 进行分析
+- 将 hprof 拉取到 PC 后使用 `java -jar mem-analyze-*.jar analyze -f xxx.hprof` 分析
 
-这种方式适合以下场景：
+适合以下场景：
 - Monkey 测试时让监控在设备上持续运行
 - 长时间测试时无需保持 adb 连接
 - 多设备同时测试
@@ -23,7 +23,7 @@
 脚本位于 **device-watch** 目录（与 scripts 同级）：
 
 ```bash
-cd mem-monitor/device-watch
+cd mem-analyze/device-watch
 chmod +x deploy-device-watch.sh
 ./deploy-device-watch.sh
 ```
@@ -62,10 +62,10 @@ adb shell monkey -p com.example.app --throttle 300 -v 10000
 adb shell cat /data/local/tmp/watch.log
 
 # 拉取 hprof 文件
-adb pull /data/local/tmp/mem-monitor/ ./
+adb pull /data/local/tmp/mem-analyze/ ./
 
 # 分析 hprof
-java -jar mem-monitor-1.0.0-all.jar analyze heap_com.example.app_20260128_123456.hprof
+java -jar mem-analyze-1.0.0-all.jar analyze heap_com.example.app_20260128_123456.hprof
 ```
 
 ## 命令参数
@@ -80,7 +80,7 @@ java -jar mem-monitor-1.0.0-all.jar analyze heap_com.example.app_20260128_123456
   -t <阈值>       堆内存使用率阈值 (%)，默认: 80
   -i <间隔>       监控间隔 (秒)，默认: 10
   -n <次数>       连续超过阈值触发dump次数，默认: 3
-  -o <目录>       输出目录，默认: /data/local/tmp/mem-monitor
+  -o <目录>       输出目录，默认: /data/local/tmp/mem-analyze
   -m <次数>       最大监控次数，0=无限，默认: 0
   -g              dump 前执行 GC（默认启用）
   -b              包含 bitmap 数据 (Android 14+)
@@ -145,7 +145,7 @@ adb shell "pkill -f device-watch.sh"
 
 # 4. 查看结果
 adb shell cat /data/local/tmp/watch.log
-adb pull /data/local/tmp/mem-monitor/ ./
+adb pull /data/local/tmp/mem-analyze/ ./
 ```
 
 ### 限制监控次数
@@ -207,10 +207,10 @@ adb shell sh /data/local/tmp/device-watch.sh -p com.example.app \
   包名: com.example.app
   原因: 文件句柄连续 3 次超过阈值 1000
   时间: 14:30:55
-  输出: /data/local/tmp/mem-monitor/heap_com.example.app_20260128_143055.hprof
-  FD 信息: /data/local/tmp/mem-monitor/fd_com.example.app_20260128_143055.txt
+  输出: /data/local/tmp/mem-analyze/heap_com.example.app_20260128_143055.hprof
+  FD 信息: /data/local/tmp/mem-analyze/fd_com.example.app_20260128_143055.txt
   正在 dump FD 信息...
-  ✓ FD 信息已保存: /data/local/tmp/mem-monitor/fd_com.example.app_20260128_143055.txt (共 1050 个 FD)
+  ✓ FD 信息已保存: /data/local/tmp/mem-analyze/fd_com.example.app_20260128_143055.txt (共 1050 个 FD)
     FD 统计: 文件=450, socket=300, pipe=200, anon=100
     最常见的文件 FD (前10个):
       1. [15次] /data/data/com.example.app/files/cache1
@@ -223,7 +223,7 @@ adb shell sh /data/local/tmp/device-watch.sh -p com.example.app \
 ### hprof 文件位置
 
 ```
-/data/local/tmp/mem-monitor/
+/data/local/tmp/mem-analyze/
 ├── heap_com.example.app_20260128_143055.hprof
 ├── fd_com.example.app_20260128_143055.txt      # FD 触发时生成
 ├── heap_com.example.app_20260128_150012.hprof
@@ -235,18 +235,9 @@ adb shell sh /data/local/tmp/device-watch.sh -p com.example.app \
 - `hprof` 文件**不包含** FD 信息，需要查看对应的 `fd_*.txt` 文件
 - `fd_*.txt` 文件包含所有文件描述符的路径列表（按字母排序，参考 KOOM）
 
-## 与 PC 端 watch 的对比
+## 说明
 
-| 特性 | PC 端 watch | 设备端 watch |
-|------|-------------|--------------|
-| 需要 adb 连接 | 持续需要 | 仅部署时需要 |
-| 实时分析 | ✅ 自动分析 | ❌ 需手动拉取分析 |
-| 快速内存增长检测 | ✅ 支持 | ✅ **支持**（高水位线+增量阈值） |
-| FD/Thread 阈值 | ✅ 支持 | ✅ **支持**（参考 KOOM） |
-| 截屏 | ✅ 自动截屏 | ❌ 不支持 |
-| 资源占用 | PC 端 | 设备端 |
-| Monkey 测试 | 需同时运行 | 可后台运行 |
-| 多设备支持 | 需切换设备 | 每设备独立运行 |
+PC 端已不再提供 `watch`/`scan` 命令；监控推荐使用**设备端 device-watch**：部署后可在设备上运行，无需持续连接 adb，适合 Monkey 测试与多设备场景。分析在 PC 端使用 `analyze -f <hprof>` 完成。
 
 ## 监控机制说明（参考 KOOM）
 
@@ -309,7 +300,7 @@ adb shell sh /data/local/tmp/device-watch.sh -p com.example.app \
 **分析 FD 泄露**：
 ```bash
 # 拉取 FD 文件
-adb pull /data/local/tmp/mem-monitor/fd_com.example.app_20260128_143055.txt ./
+adb pull /data/local/tmp/mem-analyze/fd_com.example.app_20260128_143055.txt ./
 
 # 查看最常见的 FD（出现次数最多的路径）
 cat fd_com.example.app_20260128_143055.txt | grep "^/" | sort | uniq -c | sort -rn | head -20
@@ -346,7 +337,7 @@ adb shell "pkill -f device-watch.sh"
 ### 清理输出文件
 
 ```bash
-adb shell rm -rf /data/local/tmp/mem-monitor/
+adb shell rm -rf /data/local/tmp/mem-analyze/
 adb shell rm /data/local/tmp/watch.log
 ```
 
@@ -363,7 +354,7 @@ MONKEY_EVENTS=10000
 ./device-watch/deploy-device-watch.sh
 
 # 2. 清理旧数据
-adb shell rm -rf /data/local/tmp/mem-monitor/
+adb shell rm -rf /data/local/tmp/mem-analyze/
 adb shell rm -f /data/local/tmp/watch.log
 
 # 3. 启动应用
@@ -386,14 +377,14 @@ echo "监控已停止"
 
 # 8. 获取结果
 mkdir -p ./monkey_results
-adb pull /data/local/tmp/mem-monitor/ ./monkey_results/
+adb pull /data/local/tmp/mem-analyze/ ./monkey_results/
 adb pull /data/local/tmp/watch.log ./monkey_results/
 
 # 9. 分析 hprof 文件
-for hprof in ./monkey_results/mem-monitor/*.hprof; do
+for hprof in ./monkey_results/mem-analyze/*.hprof; do
     if [ -f "$hprof" ]; then
         echo "分析: $hprof"
-        java -jar build/libs/mem-monitor-1.0.0-all.jar analyze "$hprof" -o ./monkey_results/
+        java -jar build/libs/mem-analyze-1.0.0-all.jar analyze "$hprof" -o ./monkey_results/
     fi
 done
 

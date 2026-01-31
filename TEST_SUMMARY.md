@@ -55,7 +55,7 @@
 ### 运行自动化测试
 
 ```bash
-cd mem-monitor
+cd mem-analyze
 
 # 运行所有测试
 ./scripts/test_leaks.sh all
@@ -70,7 +70,7 @@ cd mem-monitor
 ### 运行单元测试
 
 ```bash
-cd mem-monitor
+cd mem-analyze
 
 # 运行所有单元测试
 ./gradlew test --tests HprofAnalyzerLeakDetectionTest
@@ -82,7 +82,7 @@ cd mem-monitor
 ## 📁 文件结构
 
 ```
-mem-monitor/
+mem-analyze/
 ├── scripts/
 │   ├── test_leaks.sh                     # 自动化测试脚本（主要）
 │   └── generate_test_hprof.sh            # 辅助脚本（生成测试数据）
@@ -90,7 +90,7 @@ mem-monitor/
 ├── TEST_GUIDE.md                         # 测试指南（手动生成hprof）
 ├── TDD_TEST_RESULTS.md                   # TDD测试结果总结
 ├── build/libs/
-│   └── mem-monitor-1.0.0-all.jar        # 最新构建的JAR文件（12MB）
+│   └── mem-analyze-1.0.0-all.jar        # 最新构建的JAR文件（12MB）
 └── src/test/kotlin/com/koom/monitor/
     └── HprofAnalyzerLeakDetectionTest.kt # 单元测试文件
 ```
@@ -105,7 +105,7 @@ mem-monitor/
 4. **等待创建** → 等待泄露对象创建完成
 5. **Dump Heap** → 自动执行 `adb shell am dumpheap -g -b png`（-g 触发 GC，-b png 包含 Bitmap 数据）
 6. **拉取文件** → 自动从设备拉取 hprof
-7. **分析文件** → 自动运行 `java -jar mem-monitor-1.0.0-all.jar analyze`
+7. **分析文件** → 自动运行 `java -jar mem-analyze-1.0.0-all.jar analyze`
 8. **验证结果** → 自动验证检测结果
 
 ## 📊 预期结果
@@ -126,7 +126,7 @@ mem-monitor/
 ## 🎯 下一步
 
 1. **运行测试**：执行 `./test_leaks.sh all` 验证所有功能
-2. **查看报告**：检查 `/tmp/mem-monitor-test/analysis_output_*/` 目录中的报告
+2. **查看报告**：检查 `/tmp/mem-analyze-test/analysis_output_*/` 目录中的报告
 3. **修复问题**：根据测试结果修复任何检测问题
 4. **持续改进**：根据测试反馈优化检测逻辑
 

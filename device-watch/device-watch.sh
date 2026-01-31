@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # ============================================================================
-# mem-monitor 设备端内存监控脚本
+# mem-analyze 设备端内存监控脚本
 # 
 # 功能：在 Android 设备上直接运行，监控应用内存并自动 dump hprof
 # 
@@ -14,7 +14,7 @@
 #   -t <阈值>       堆内存使用率阈值，默认 80 (%)
 #   -i <间隔>       监控间隔秒数，默认 10
 #   -n <次数>       连续超过阈值触发dump的次数，默认 3
-#   -o <输出目录>   hprof 输出目录，默认 /data/local/tmp/mem-monitor
+#   -o <输出目录>   hprof 输出目录，默认 /data/local/tmp/mem-analyze
 #   -m <最大次数>   最大监控次数，0 表示无限，默认 0
 #   -g              dump 前执行 GC（默认启用，使用 -g 可显式指定）
 #   -b              包含 bitmap 数据 (Android 14+)
@@ -29,12 +29,12 @@
 #   sh /data/local/tmp/device-watch.sh -p com.example.app -p com.other.app -g -b
 #
 # 输出：
-#   hprof 文件保存在 /data/local/tmp/mem-monitor/ 目录下
+#   hprof 文件保存在 /data/local/tmp/mem-analyze/ 目录下
 #   文件名格式：heap_<包名>_<时间戳>.hprof
 #
 # 后续分析：
-#   adb pull /data/local/tmp/mem-monitor/ ./
-#   java -jar mem-monitor-1.0.0-all.jar analyze <hprof文件>
+#   adb pull /data/local/tmp/mem-analyze/ ./
+#   java -jar mem-analyze-1.0.0-all.jar analyze <hprof文件>
 # ============================================================================
 
 # 默认配置（参考 KOOM）
@@ -42,7 +42,7 @@ PACKAGE_LIST=""   # 包名列表，空格分隔（支持 -p 多次指定）
 HEAP_THRESHOLD=80
 INTERVAL=10
 TRIGGER_COUNT=3
-OUTPUT_DIR="/data/local/tmp/mem-monitor"
+OUTPUT_DIR="/data/local/tmp/mem-analyze"
 MAX_ITERATIONS=0
 USE_GC=true  # 默认启用 GC，减少非泄露对象的干扰
 USE_BITMAP=false
@@ -77,7 +77,7 @@ NC='\033[0m' # No Color
 # 显示帮助
 show_help() {
     echo "=============================================="
-    echo "  mem-monitor 设备端内存监控"
+    echo "  mem-analyze 设备端内存监控"
     echo "=============================================="
     echo ""
     echo "用法: sh $0 -p <包名> [ -p <包名2> ... ] [选项]"
@@ -89,7 +89,7 @@ show_help() {
     echo "  -t <阈值>       堆内存使用率阈值 (%)，默认: 80"
     echo "  -i <间隔>       监控间隔 (秒)，默认: 10"
     echo "  -n <次数>       连续超过阈值触发dump次数，默认: 3"
-    echo "  -o <目录>       输出目录，默认: /data/local/tmp/mem-monitor"
+    echo "  -o <目录>       输出目录，默认: /data/local/tmp/mem-analyze"
     echo "  -m <次数>       最大监控次数，0=无限，默认: 0"
     echo "  -g              dump 前执行 GC（默认启用）"
     echo "  -b              包含 bitmap 数据 (Android 14+)"
@@ -106,7 +106,7 @@ show_help() {
     echo "  sh $0 -p com.example.app --fd-threshold 500 --thread-threshold 200"
     echo "  sh $0 -p com.example.app --heap-high-watermark 85 --heap-delta 200"
     echo ""
-    echo "输出文件位置: /data/local/tmp/mem-monitor/"
+    echo "输出文件位置: /data/local/tmp/mem-analyze/"
     echo ""
     exit 0
 }
@@ -422,7 +422,7 @@ perform_dump() {
             echo "    adb pull $fd_file ./"
             echo "    # 注意: hprof 文件不包含 FD 信息，请查看 fd_*.txt 文件"
         fi
-        echo "    java -jar mem-monitor-1.0.0-all.jar analyze $(basename $hprof_file)"
+        echo "    java -jar mem-analyze-1.0.0-all.jar analyze $(basename $hprof_file)"
         echo ""
     else
         echo "  ✗ Dump 失败: 文件未生成"
@@ -436,7 +436,7 @@ perform_dump() {
 main() {
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║      mem-monitor 设备端内存监控                              ║"
+    echo "║      mem-analyze 设备端内存监控                              ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
     echo "📱 设备: $(getprop ro.product.model)"

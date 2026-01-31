@@ -15,8 +15,8 @@ PACKAGE_NAME="com.koom.normal"
 ACTIVITY_NAME="com.koom.normal.MainActivity"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-JAR_PATH="$PROJECT_DIR/build/libs/mem-monitor-1.0.0-all.jar"
-TEST_OUTPUT_DIR="/tmp/mem-monitor-test-normal"
+JAR_PATH="$PROJECT_DIR/build/libs/mem-analyze-1.0.0-all.jar"
+TEST_OUTPUT_DIR="/tmp/mem-analyze-test-normal"
 DEVICE_HPROF_DIR="/data/local/tmp"
 
 # 创建测试输出目录

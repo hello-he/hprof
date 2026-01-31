@@ -84,7 +84,7 @@
 ### 运行所有测试
 
 ```bash
-cd mem-monitor
+cd mem-analyze
 ./gradlew test --tests HprofAnalyzerLeakDetectionTest
 ```
 
@@ -180,7 +180,7 @@ done
 # 示例 GitHub Actions 配置
 - name: Run Leak Detection Tests
   run: |
-    cd mem-monitor
+    cd mem-analyze
     ./gradlew test --tests HprofAnalyzerLeakDetectionTest
 ```
 

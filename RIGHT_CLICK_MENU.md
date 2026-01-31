@@ -2,11 +2,11 @@
 
 ## 已安装的文件
 
-1. **脚本文件**: `~/.local/bin/mem-monitor-analyze.sh`
+1. **脚本文件**: `~/.local/bin/mem-analyze.sh`
    - 执行实际的分析工作
    - 自动查找 jar 文件并执行分析
 
-2. **桌面文件**: `~/.local/share/applications/mem-monitor-analyze.desktop`
+2. **桌面文件**: `~/.local/share/applications/mem-analyze.desktop`
    - 定义右键菜单项
    - 关联 .hprof 文件类型
 
@@ -25,14 +25,14 @@
 ### 方法 2: 命令行
 
 ```bash
-~/.local/bin/mem-monitor-analyze.sh /path/to/file.hprof
+~/.local/bin/mem-analyze.sh /path/to/file.hprof
 ```
 
 ## 功能特性
 
 - ✅ 自动检测 jar 文件位置
 - ✅ 显示分析进度对话框
-- ✅ 自动生成报告到 `hprof文件所在目录/mem-monitor-reports/`
+- ✅ 自动生成报告到 `hprof文件所在目录/mem-analyze-reports/`
 - ✅ 分析完成后自动提示是否打开 HTML 报告
 - ✅ 错误提示和日志记录
 
@@ -40,12 +40,12 @@
 
 分析报告会生成在：
 ```
-hprof文件所在目录/mem-monitor-reports/
+hprof文件所在目录/mem-analyze-reports/
 ```
 
 例如：
 - 文件：`/home/user/heap.hprof`
-- 报告：`/home/user/mem-monitor-reports/`
+- 报告：`/home/user/mem-analyze-reports/`
 
 ## 故障排除
 
@@ -70,12 +70,12 @@ hprof文件所在目录/mem-monitor-reports/
 
 检查 jar 文件是否存在：
 ```bash
-ls -lh ~/workspaces/koom/mem-monitor/build/libs/mem-monitor-1.0.0-all.jar
+ls -lh ~/workspaces/koom/mem-analyze/build/libs/mem-analyze-1.0.0-all.jar
 ```
 
 如果 jar 文件位置改变了，需要更新脚本中的路径：
 ```bash
-nano ~/.local/bin/mem-monitor-analyze.sh
+nano ~/.local/bin/mem-analyze.sh
 ```
 
 修改 `JAR_PATH` 变量为正确的路径。
@@ -99,8 +99,8 @@ sudo pacman -S zenity
 删除以下文件即可卸载：
 
 ```bash
-rm ~/.local/bin/mem-monitor-analyze.sh
-rm ~/.local/share/applications/mem-monitor-analyze.desktop
+rm ~/.local/bin/mem-analyze.sh
+rm ~/.local/share/applications/mem-analyze.desktop
 rm ~/.local/share/mime/packages/hprof.xml
 update-desktop-database ~/.local/share/applications
 update-mime-database ~/.local/share/mime
@@ -111,7 +111,7 @@ update-mime-database ~/.local/share/mime
 如果 jar 文件位置改变了，只需要更新脚本中的路径：
 
 ```bash
-nano ~/.local/bin/mem-monitor-analyze.sh
+nano ~/.local/bin/mem-analyze.sh
 ```
 
 修改 `JAR_PATH` 变量即可。

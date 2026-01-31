@@ -14,6 +14,8 @@
 - **大 ByteArray 泄露** - 超过 1MB 的字节数组占用大量内存
 - **线程泄露** - 重复的线程名（同名线程超过 5 个）
 
+> 📊 **与其他工具对比：** 本工具与 KOOM、LeakCanary、Android Studio Profiler 在「分析 hprof」模式下的优劣对比，见上级目录 [COMPARISON.md](../COMPARISON.md)。
+
 ## 快速开始
 
 ### 1. 运行安装脚本
@@ -56,9 +58,9 @@ hprof文件所在目录/hprof文件名_时间戳/
 删除以下文件即可卸载：
 
 ```bash
-rm ~/.local/bin/mem-monitor-analyze.sh
-rm ~/.local/bin/mem-monitor-1.0.0-all.jar
-rm ~/.local/share/applications/mem-monitor-analyze.desktop
+rm ~/.local/bin/mem-analyze.sh
+rm ~/.local/bin/mem-analyze-1.0.0-all.jar
+rm ~/.local/share/applications/mem-analyze.desktop
 rm ~/.local/share/mime/packages/hprof.xml
 update-desktop-database ~/.local/share/applications
 update-mime-database ~/.local/share/mime
@@ -85,7 +87,7 @@ update-mime-database ~/.local/share/mime
 
 ### 找不到jar文件
 
-确保此目录包含 `mem-monitor-1.0.0-all.jar` 文件。如果文件缺失，请联系发布者获取完整版本。
+确保此目录包含 `mem-analyze-1.0.0-all.jar` 文件。如果文件缺失，请联系发布者获取完整版本。
 
 ### 没有图形界面（zenity）
 

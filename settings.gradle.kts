@@ -1,1 +1,1 @@
-rootProject.name = "mem-monitor"
+rootProject.name = "mem-analyze"

@@ -29,7 +29,7 @@
 ### 步骤 1: 安装 Demo APK
 
 ```bash
-cd mem-monitor/demo
+cd mem-analyze/demo
 ./gradlew installDebug
 ```
 
@@ -168,7 +168,7 @@ adb shell rm /sdcard/all_leaks.hprof
 ### 运行所有测试
 
 ```bash
-cd mem-monitor
+cd mem-analyze
 ./gradlew test --tests HprofAnalyzerLeakDetectionTest
 ```
 

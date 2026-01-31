@@ -115,7 +115,7 @@ $ADB_CMD shell chmod 755 "$DEVICE_PATH/device-watch.sh"
 
 # 创建输出目录
 echo "📁 创建输出目录..."
-$ADB_CMD shell mkdir -p "$DEVICE_PATH/mem-monitor"
+$ADB_CMD shell mkdir -p "$DEVICE_PATH/mem-analyze"
 
 # 若指定了包名列表文件，生成并推送启动脚本
 if [ -n "$PACKAGE_LIST_FILE" ]; then
@@ -191,10 +191,10 @@ echo ""
 echo "📊 后续分析 hprof 文件："
 echo ""
 echo "  1. 拉取 hprof 文件:"
-echo "     adb pull $DEVICE_PATH/mem-monitor/ ./"
+echo "     adb pull $DEVICE_PATH/mem-analyze/ ./"
 echo ""
 echo "  2. 分析 hprof:"
-echo "     java -jar mem-monitor-1.0.0-all.jar analyze <hprof文件>"
+echo "     java -jar mem-analyze-1.0.0-all.jar analyze <hprof文件>"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""

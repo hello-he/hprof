@@ -11,7 +11,7 @@
 | **分析发生位置** | 本机 (PC/Linux) CLI | 设备端 (dump 后当场分析) | 本机 CLI 或 App 内 | 本机 IDE，连接设备或打开 hprof |
 | **输入** | 任意 hprof 文件 | 本应用触发的 hprof | 任意 hprof（Shark CLI）或 App 内 dump | 从运行中应用抓的 dump 或已保存的 hprof |
 | **是否依赖 App 集成** | 否 | 是（需集成 KOOM） | 否（Shark CLI）/ 是（App 内） | 否（仅分析时可不依赖） |
-| **典型用法** | `java -jar mem-analyze-*.jar analyze -f xxx.hprof` | 阈值触发 → 设备上 dump+分析 → 上报 | `shark-cli -h file.hprof` 或 App 内自动 | 在 IDE 里抓 dump → 点「Analyze」/「Show activity/fragment leaks」 |
+| **典型用法** | `java -jar mem-analyze-*.jar -f xxx.hprof` | 阈值触发 → 设备上 dump+分析 → 上报 | `shark-cli -h file.hprof` 或 App 内自动 | 在 IDE 里抓 dump → 点「Analyze」/「Show activity/fragment leaks」 |
 | **输出** | 文本 + HTML 报告，可选 Bitmap 提取 | 设备端报告（可上传） | 控制台/报告 + 堆分析结果 | 界面：类列表、实例、引用链 |
 
 ---
@@ -100,7 +100,7 @@
 ## 4. 使用场景建议（analyze 模式）
 
 - **在 PC 上对任意 hprof 做一次性或批量分析、要可脚本化、要中文报告与统计**  
-  → 用 **mem-analyze** `analyze -f xxx.hprof`。
+  → 用 **mem-analyze** `-f xxx.hprof`。
 
 - **只在设备上触发分析、不能或不想把 hprof 拷出来**  
   → 用 **KOOM**（需 App 集成）。

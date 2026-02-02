@@ -44,7 +44,7 @@ adb shell monkey -p com.example.app 5000
 从设备拉取 dump 出的 hprof 后，在本机分析：
 
 ```bash
-java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof
+java -jar build/libs/mem-analyze-1.0.0-all.jar -f heap.hprof
 ```
 
 工具会自动检测 hprof 是否包含 Bitmap 数据（来自 `am dumpheap -g -b png`），若包含则自动提取并生成报告。
@@ -57,10 +57,10 @@ java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof
 
 ```bash
 # 离线分析
-java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof
+java -jar build/libs/mem-analyze-1.0.0-all.jar -f heap.hprof
 
 # 只提取大 Bitmap
-java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof --large-only
+java -jar build/libs/mem-analyze-1.0.0-all.jar -f heap.hprof --large-only
 
 # 综合测试（device-watch + Monkey）
 bash scripts/run_test.sh

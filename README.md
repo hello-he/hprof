@@ -1,13 +1,13 @@
 # Android Memory Analyze (mem-analyze)
 
-Android 内存泄露分析工具：**离线分析 hprof 文件**（analyze），以及**设备端内存监控**（device-watch，脚本内置到手机，无需持续连接 adb）。
+Android 内存泄露分析工具：**离线分析 hprof 文件**，以及**设备端内存监控**（device-watch，脚本内置到手机，无需持续连接 adb）。
 
 > 📖 **新手必读：** 想了解什么是内存泄露？查看 [内存泄露详解 (MEMORY_LEAK.md)](MEMORY_LEAK.md)  
-> 📊 **工具对比：** 与 KOOM / LeakCanary / Android Studio Profiler 在 analyze 模式下的优劣对比，见 [COMPARISON.md](COMPARISON.md)
+> 📊 **工具对比：** 与 KOOM / LeakCanary / Android Studio Profiler 的优劣对比，见 [COMPARISON.md](COMPARISON.md)
 
 ## 功能特性
 
-### 1. 离线 Hprof 分析 (`analyze`)
+### 1. 离线 Hprof 分析
 
 - 分析 hprof 文件，检测 Activity / Fragment / Animator / Service / 大 Bitmap / 大 ByteArray 等泄露
 - 自动提取 Bitmap 图片（支持 Android 14+ `am dumpheap -g -b png`）
@@ -22,7 +22,7 @@ Android 内存泄露分析工具：**离线分析 hprof 文件**（analyze），
 - 推荐后台运行（`nohup ... > watch.log 2>&1 &`），可拔掉 USB
 - 详见 [device-watch/README.md](device-watch/README.md) 与 [DEVICE_WATCH.md](DEVICE_WATCH.md)
 
-### 3. Bitmap 提取（analyze 时可选）
+### 3. Bitmap 提取（分析时可选）
 
 - 支持 Android 14+ dumpData 压缩数据
 - 自动检测重复 Bitmap
@@ -38,8 +38,6 @@ mem-analyze/
 │   │   ├── BitmapExtractor.kt      # Bitmap 提取、重复检测、报告生成
 │   │   ├── HprofAnalyzer.kt        # Hprof 分析、泄露检测
 │   │   └── HprofRawReader.kt       # Hprof 原始数据读取
-│   ├── command/
-│   │   └── AnalyzeCommand.kt       # analyze 命令
 │   └── model/
 │       └── BitmapModels.kt         # Bitmap/报告模型
 ├── device-watch/                    # 设备端监控（推荐）
@@ -78,16 +76,16 @@ cd /path/to/mem-analyze
 
 ```bash
 # 基本分析
-java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof
+java -jar build/libs/mem-analyze-1.0.0-all.jar -f heap.hprof
 
 # 自动检测并提取 Bitmap（若 hprof 包含 dumpheap -b 数据）
-java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof
+java -jar build/libs/mem-analyze-1.0.0-all.jar -f heap.hprof
 
 # 只提取大 Bitmap(>1M 像素)
-java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof --large-only
+java -jar build/libs/mem-analyze-1.0.0-all.jar -f heap.hprof --large-only
 
 # 指定输出目录
-java -jar build/libs/mem-analyze-1.0.0-all.jar analyze -f heap.hprof -o ./reports
+java -jar build/libs/mem-analyze-1.0.0-all.jar -f heap.hprof -o ./reports
 ```
 
 ### 3. 设备端监控（推荐，无需持续连 adb）
@@ -116,7 +114,7 @@ chmod +x install.sh
 安装后，在文件管理器中右键 `.hprof` →「打开方式」→「分析内存泄露」。  
 详见 [right-click-menu/README.md](right-click-menu/README.md)。
 
-## 命令行参数（analyze）
+## 命令行参数
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|

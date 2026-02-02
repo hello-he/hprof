@@ -128,7 +128,7 @@ cd mem-analyze
 ➜ 执行dumpheap: test_activity_leak.hprof
 ✓ hprof文件已保存到: /tmp/mem-analyze-test/test_activity_leak.hprof
 ➜ 分析hprof文件: /tmp/mem-analyze-test/test_activity_leak.hprof
-➜ 执行命令: java -jar .../mem-analyze-1.0.0-all.jar analyze --hprof="..." --output="..."
+➜ 执行命令: java -jar .../mem-analyze-1.0.0-all.jar -f "..." -o "..."
 ✓ 分析完成
 ➜ 验证泄露检测结果...
 ✓ 检测到Activity泄露 (1个)

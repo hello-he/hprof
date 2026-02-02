@@ -34,7 +34,7 @@
 #
 # 后续分析：
 #   adb pull /data/local/tmp/mem-analyze/ ./
-#   java -jar mem-analyze-1.0.0-all.jar analyze <hprof文件>
+#   java -jar mem-analyze-1.0.0-all.jar -f <hprof文件>
 # ============================================================================
 
 # 默认配置（参考 KOOM）
@@ -422,7 +422,7 @@ perform_dump() {
             echo "    adb pull $fd_file ./"
             echo "    # 注意: hprof 文件不包含 FD 信息，请查看 fd_*.txt 文件"
         fi
-        echo "    java -jar mem-analyze-1.0.0-all.jar analyze $(basename $hprof_file)"
+        echo "    java -jar mem-analyze-1.0.0-all.jar -f $(basename $hprof_file)"
         echo ""
     else
         echo "  ✗ Dump 失败: 文件未生成"

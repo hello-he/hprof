@@ -124,9 +124,9 @@ analyze_heap() {
 
     # 执行分析
     local output_file="$TEST_OUTPUT_DIR/analysis_result_$(basename "$hprof_file" .hprof).txt"
-    print_info "执行命令: java -jar $JAR_PATH analyze --hprof \"$hprof_file\" --output \"$output_dir\""
+    print_info "执行命令: java -jar $JAR_PATH -f \"$hprof_file\" -o \"$output_dir\""
     
-    if java -jar "$JAR_PATH" analyze --hprof "$hprof_file" --output "$output_dir" > "$output_file" 2>&1; then
+    if java -jar "$JAR_PATH" -f "$hprof_file" -o "$output_dir" > "$output_file" 2>&1; then
         print_success "分析完成"
     else
         print_error "分析失败，查看日志: $output_file"

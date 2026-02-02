@@ -9,7 +9,7 @@
 - 将监控脚本部署到设备上（`deploy-device-watch.sh`）
 - 在设备上独立运行监控（可拔掉 USB）
 - 当内存超过阈值时自动 dump hprof
-- 将 hprof 拉取到 PC 后使用 `java -jar mem-analyze-*.jar analyze -f xxx.hprof` 分析
+- 将 hprof 拉取到 PC 后使用 `java -jar mem-analyze-*.jar -f xxx.hprof` 分析
 
 适合以下场景：
 - Monkey 测试时让监控在设备上持续运行
@@ -65,7 +65,7 @@ adb shell cat /data/local/tmp/watch.log
 adb pull /data/local/tmp/mem-analyze/ ./
 
 # 分析 hprof
-java -jar mem-analyze-1.0.0-all.jar analyze heap_com.example.app_20260128_123456.hprof
+java -jar mem-analyze-1.0.0-all.jar -f heap_com.example.app_20260128_123456.hprof
 ```
 
 ## 命令参数
@@ -237,7 +237,7 @@ adb shell sh /data/local/tmp/device-watch.sh -p com.example.app \
 
 ## 说明
 
-PC 端已不再提供 `watch`/`scan` 命令；监控推荐使用**设备端 device-watch**：部署后可在设备上运行，无需持续连接 adb，适合 Monkey 测试与多设备场景。分析在 PC 端使用 `analyze -f <hprof>` 完成。
+PC 端已不再提供 `watch`/`scan` 命令；监控推荐使用**设备端 device-watch**：部署后可在设备上运行，无需持续连接 adb，适合 Monkey 测试与多设备场景。分析在 PC 端使用 `-f <hprof>` 完成。
 
 ## 监控机制说明（参考 KOOM）
 
@@ -384,7 +384,7 @@ adb pull /data/local/tmp/watch.log ./monkey_results/
 for hprof in ./monkey_results/mem-analyze/*.hprof; do
     if [ -f "$hprof" ]; then
         echo "分析: $hprof"
-        java -jar build/libs/mem-analyze-1.0.0-all.jar analyze "$hprof" -o ./monkey_results/
+        java -jar build/libs/mem-analyze-1.0.0-all.jar -f "$hprof" -o ./monkey_results/
     fi
 done
 

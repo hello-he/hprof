@@ -26,14 +26,13 @@ fi
 # 显示进度对话框
 zenity --info --text="正在分析内存泄露...\n\n文件: $(basename "$1")\n\n请稍候..." --title="内存泄露分析" --timeout=2 2>/dev/null &
 
-# 执行分析（analyze 命令会在 -o 目录下创建子目录）
-# 注意：analyze 命令使用 -f 参数指定 hprof 文件
-java -jar "$JAR_PATH" analyze -f "$1" -o "$BASE_REPORT_DIR" 2>&1 | tee /tmp/mem-analyze.log
+# 执行分析（会在 -o 目录下创建子目录）
+java -jar "$JAR_PATH" -f "$1" -o "$BASE_REPORT_DIR" 2>&1 | tee /tmp/mem-analyze.log
 ANALYZE_EXIT_CODE=$?
 
 # 检查结果
 if [ $ANALYZE_EXIT_CODE -eq 0 ]; then
-    # analyze 命令会在 BASE_REPORT_DIR 下创建子目录（格式：hprof文件名_yyyyMMdd_HHmmss）
+    # 工具会在 BASE_REPORT_DIR 下创建子目录（格式：hprof文件名_yyyyMMdd_HHmmss）
     # 获取hprof文件名（不含扩展名）用于匹配报告目录
     HPROF_BASENAME=$(basename "$1" .hprof)
     

@@ -46,8 +46,9 @@
 
 - **前台运行**：在运行 `device-watch.sh` 的终端按 **Ctrl+C** 即可正常停止。
 - **后台运行**（如使用 `nohup ... &`）：
-  1. 结束进程：`adb shell 'pkill -f device-watch.sh'`（建议用单引号，避免部分设备报 inaccessible or not found）
-  2. 若 pkill 不可用，可先查 PID：`adb shell "ps -ef | grep device-watch"`（第二列为 PID），再执行 `adb shell kill <PID>`
+  ```bash
+  adb shell "kill \$(ps -ef | grep device-watch.sh | grep -v grep | awk '{print \$2}')"
+  ```
 
 ## 更多说明
 

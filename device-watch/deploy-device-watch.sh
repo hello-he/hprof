@@ -94,6 +94,29 @@ if ! $ADB_CMD devices | grep -q "device$"; then
     exit 1
 fi
 
+# 必须先 adb root 成功才可以部署（需要写 /data/local/tmp 等）
+echo "🔐 检查 root 权限..."
+if ! $ADB_CMD root 2>/dev/null; then
+    echo "❌ adb root 执行失败"
+    echo ""
+    echo "本脚本必须在使用 root 权限的设备上运行，请先确保："
+    echo "  1. 设备已 root，或为 eng/userdebug 版本"
+    echo "  2. 执行 adb root 后终端提示已切换为 root"
+    echo ""
+    exit 1
+fi
+# 等待 root 生效（部分设备 adb root 后需短暂等待）
+sleep 1
+if ! $ADB_CMD shell id 2>/dev/null | grep -q "uid=0"; then
+    echo "❌ 当前无 root 权限（uid 不为 0）"
+    echo ""
+    echo "必须先 adb root 成功才可以继续部署。请检查设备是否已 root 或为 userdebug 镜像。"
+    echo ""
+    exit 1
+fi
+echo "   ✓ 已具备 root 权限"
+echo ""
+
 DEVICE_MODEL=$($ADB_CMD shell getprop ro.product.model 2>/dev/null | tr -d '\r')
 ANDROID_VERSION=$($ADB_CMD shell getprop ro.build.version.release 2>/dev/null | tr -d '\r')
 echo "   设备: $DEVICE_MODEL (Android $ANDROID_VERSION)"
@@ -184,7 +207,8 @@ fi
 echo ""
 echo "  查看帮助: adb shell sh $DEVICE_PATH/device-watch.sh -h"
 echo ""
-echo "🛑 停止监控: adb shell \"pkill -f device-watch.sh\""
+echo "🛑 停止监控:"
+echo "     adb shell \"kill \\\$(ps -ef | grep device-watch.sh | grep -v grep | awk '{print \\\$2}')\""
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""

@@ -20,7 +20,7 @@ class IntegrationTest {
 
     @Before
     fun setUp() {
-        tempDir = createTempDirectory("mem-monitor-test")
+        tempDir = createTempDirectory("mem-analyze-test")
     }
 
     @After

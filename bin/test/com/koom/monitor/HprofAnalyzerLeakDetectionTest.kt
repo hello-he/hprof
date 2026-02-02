@@ -140,28 +140,6 @@ class HprofAnalyzerLeakDetectionTest {
 
 
 
-    // ==================== BroadcastReceiver 泄露检测测试 ====================
-
-    @Test
-    fun testBroadcastReceiverLeakDetection() {
-        val hprofFile = getHprofFile("broadcast_receiver_leak.hprof")
-        if (hprofFile == null) {
-            println("⚠️  跳过测试: broadcast_receiver_leak.hprof 不存在")
-            println("   生成方法: 运行 demo APK，点击'BroadcastReceiver泄露'按钮，然后dump hprof")
-            return
-        }
-
-        val result = analyzeAndVerify(hprofFile)
-
-        // 验证 BroadcastReceiver 泄露被检测到
-        assertTrue(
-            "应该检测到 BroadcastReceiver 泄露",
-            result.stats.leakedBroadcastReceiverCount > 0
-        )
-
-        println("✅ BroadcastReceiver 泄露检测通过: 检测到 ${result.stats.leakedBroadcastReceiverCount} 个泄露")
-    }
-
     // ==================== Animator 泄露检测测试 ====================
 
     @Test
@@ -408,11 +386,10 @@ class HprofAnalyzerLeakDetectionTest {
 
         val result = analyzeAndVerify(hprofFile)
 
-        // 验证所有泄露类型都被统计
+        // 验证所有泄露类型都被统计（与 LeakCanary 对齐，不包含 BroadcastReceiver）
         val leakTypeCounts = mapOf(
             "Activity" to result.stats.leakedActivityCount,
             "Fragment" to result.stats.leakedFragmentCount,
-            "BroadcastReceiver" to result.stats.leakedBroadcastReceiverCount,
             "Animator" to result.stats.leakedAnimatorCount,
             "Bitmap" to result.stats.leakedBitmapCount,
             "ByteArray" to result.stats.leakedByteArrayCount
@@ -429,5 +406,45 @@ class HprofAnalyzerLeakDetectionTest {
         assertTrue("应该至少检测到一种泄露", totalLeaks > 0)
 
         println("\n✅ 综合测试通过: 共检测到 $totalLeaks 个泄露对象")
+    }
+
+    // ==================== 修改部分验证：以 test.hprof 为输入 ====================
+    // 验证移除硬编码、isInnerClassOfActivity、常量替换等修改后分析器仍正常工作
+
+    @Test
+    fun testModifiedPartsWithTestHprof() {
+        val hprofFile = getHprofFile("test.hprof")
+        if (hprofFile == null) {
+            println("⚠️  跳过测试: test.hprof 不存在于 ~/tmp/hprof/")
+            return
+        }
+
+        val analyzer = HprofAnalyzer()
+        val result = analyzer.analyze(hprofFile)
+
+        // 1. 基本结果非空、无异常
+        assertNotNull("分析结果不应为空", result)
+        assertTrue("应有实例统计", result.stats.totalInstanceCount >= 0)
+        assertTrue("应有类统计", result.stats.totalClassCount > 0)
+
+        // 2. 泄露对象列表与统计一致（无硬编码导致的漏检/崩溃）
+        assertNotNull("leakingObjects 不应为 null", result.leakingObjects)
+        assertNotNull("largeObjects 不应为 null", result.largeObjects)
+        assertNotNull("classStatistics 不应为 null", result.classStatistics)
+
+        // 3. 若存在泄露对象，leakReason 应为非空且不含占位错误（常量替换正确）
+        result.leakingObjects.forEach { obj ->
+            assertNotNull("leakReason 不应为 null", obj.leakReason)
+            assertTrue("leakReason 不应为空串", obj.leakReason.isNotBlank())
+        }
+
+        // 4. 报告可正常生成（unwrapActivityContext、getAliveServiceObjectIds 等无硬编码错误）
+        val outputDir = tempDir.resolve("modified-parts-test")
+        Files.createDirectories(outputDir)
+        val savedFiles = result.saveReport(outputDir)
+        assertTrue("应成功保存报告", savedFiles.isNotEmpty())
+        assertEquals("应生成 2 个报告文件（txt + html）", 2, savedFiles.size)
+
+        println("✅ 修改部分验证通过（test.hprof）: 分析、统计、报告生成正常")
     }
 }

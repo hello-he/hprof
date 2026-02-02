@@ -150,7 +150,7 @@ data class DuplicateBitmapGroup(
 }
 
 /**
- * 泄漏报告
+ * 泄漏报告（用于 Bitmap 分析等场景）
  */
 data class LeakReport(
     /** 报告生成时间 */
@@ -161,9 +161,6 @@ data class LeakReport(
 
     /** 进程ID */
     val pid: Int,
-
-    /** 指标快照 */
-    val snapshot: MetricsSnapshot,
 
     /** 泄漏的Bitmap列表 */
     val leakedBitmaps: List<BitmapInfo> = emptyList(),

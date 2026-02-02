@@ -15,8 +15,6 @@
  */
 package kshark
 
-import kshark.HeapAnalyzer.TrieNode.LeafNode
-import kshark.HeapAnalyzer.TrieNode.ParentNode
 import kshark.HeapObject.HeapClass
 import kshark.HeapObject.HeapInstance
 import kshark.HeapObject.HeapObjectArray
@@ -250,26 +248,18 @@ class HeapAnalyzer constructor(
     return buildLeakTraceObjects(unreachableInspectedObjects, null)
   }
 
-  internal sealed class TrieNode {
-    abstract val objectId: Long
-
-    class ParentNode(override val objectId: Long) : TrieNode() {
-      val children = mutableMapOf<Long, TrieNode>()
-      override fun toString(): String {
-        return "ParentNode(objectId=$objectId, children=$children)"
-      }
-    }
-
-    class LeafNode(
-      override val objectId: Long,
-      val pathNode: ReferencePathNode
-    ) : TrieNode()
+  // 修复：TrieNode 同时支持 pathNode（泄露对象）和 children（子路径），解决泄露路径是另一泄露路径前缀时被丢弃的问题
+  internal class TrieNode(
+    val objectId: Long,
+    var pathNode: ReferencePathNode? = null  // 非 null 表示此节点是泄露对象
+  ) {
+    val children = mutableMapOf<Long, TrieNode>()
   }
 
   private fun deduplicateShortestPaths(
     inputPathResults: List<ReferencePathNode>
   ): List<ShortestPath> {
-    val rootTrieNode = ParentNode(0)
+    val rootTrieNode = TrieNode(0)
 
     inputPathResults.forEach { pathNode ->
       // Go through the linked list of nodes and build the reverse list of instances from
@@ -312,36 +302,33 @@ class HeapAnalyzer constructor(
     pathNode: ReferencePathNode,
     path: List<Long>,
     pathIndex: Int,
-    parentNode: ParentNode
+    parentNode: TrieNode
   ) {
     val objectId = path[pathIndex]
     if (pathIndex == path.lastIndex) {
-      parentNode.children[objectId] = LeafNode(objectId, pathNode)
-    } else {
-      val childNode = parentNode.children[objectId] ?: {
-        val newChildNode = ParentNode(objectId)
-        parentNode.children[objectId] = newChildNode
-        newChildNode
-      }()
-      if (childNode is ParentNode) {
-        updateTrie(pathNode, path, pathIndex + 1, childNode)
+      // 到达泄露对象，设置 pathNode（如果已存在则保留第一条，实现去重）
+      val existing = parentNode.children[objectId]
+      if (existing != null) {
+        if (existing.pathNode == null) existing.pathNode = pathNode
+      } else {
+        parentNode.children[objectId] = TrieNode(objectId, pathNode)
       }
+    } else {
+      // 中间节点
+      val childNode = parentNode.children.getOrPut(objectId) { TrieNode(objectId) }
+      updateTrie(pathNode, path, pathIndex + 1, childNode)
     }
   }
 
   private fun findResultsInTrie(
-    parentNode: ParentNode,
+    node: TrieNode,
     outputPathResults: MutableList<ReferencePathNode>
   ) {
-    parentNode.children.values.forEach { childNode ->
-      when (childNode) {
-        is ParentNode -> {
-          findResultsInTrie(childNode, outputPathResults)
-        }
-        is LeafNode -> {
-          outputPathResults += childNode.pathNode
-        }
-      }
+    // 如果当前节点是泄露对象，添加到结果
+    node.pathNode?.let { outputPathResults += it }
+    // 继续遍历子节点
+    node.children.values.forEach { childNode ->
+      findResultsInTrie(childNode, outputPathResults)
     }
   }
 

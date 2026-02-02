@@ -1,6 +1,11 @@
 # 包名列表，每行一个包名；# 开头为注释
 # 部署时使用: ./deploy-device-watch.sh package_list.txt
 #
-# com.example.app1
-# com.example.app2
-com.example.app
+com.blackview.launcher
+com.android.settings
+com.android.systemui
+com.blackview.frozenapp
+com.blackview.searchcenter
+com.blackview.weather
+com.blackview.compass
+com.blackview.filetrans

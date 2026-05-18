@@ -76,7 +76,7 @@ class AnalyzeCommandTest {
         assertEquals("bitmapOutputDir 应该匹配", bitmapDir, result.bitmapOutputDir)
 
         // 保存报告
-        val savedFiles = result.saveReport(outputDir)
+        val savedFiles = result.saveReport(outputDir, hasBitmapAnalysis = true)
 
         assertTrue("应该保存了报告文件", savedFiles.isNotEmpty())
 
@@ -85,6 +85,8 @@ class AnalyzeCommandTest {
         if (htmlFile != null) {
             val htmlContent = Files.readString(htmlFile)
             assertTrue("HTML应该包含Bitmap统计", htmlContent.contains("Bitmap 统计"))
+            assertTrue("HTML应该包含全局诊断", htmlContent.contains("全局诊断"))
+            assertTrue("HTML应该包含优化建议", htmlContent.contains("优化建议"))
 
             if (bitmapDir != null) {
                 // HTML应该包含bitmap目录名称（相对路径，不是绝对路径）

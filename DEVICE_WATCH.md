@@ -237,7 +237,7 @@ adb shell sh /data/local/tmp/device-watch.sh -p com.example.app \
 
 ## 说明
 
-PC 端已不再提供 `watch`/`scan` 命令；监控推荐使用**设备端 device-watch**：部署后可在设备上运行，无需持续连接 adb，适合 Monkey 测试与多设备场景。分析在 PC 端使用 `-f <hprof>` 完成。
+使用**设备端 device-watch**：部署后可在设备上运行，无需持续连接 adb，适合 Monkey 测试与多设备场景。分析在 PC 端使用 `-f <hprof>` 完成。
 
 ## 监控机制说明（参考 KOOM）
 

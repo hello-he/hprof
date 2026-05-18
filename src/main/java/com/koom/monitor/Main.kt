@@ -1,6 +1,7 @@
 package com.koom.monitor
 
 import com.koom.monitor.analyzer.BitmapExtractor
+import com.koom.monitor.analyzer.CompareDiagnosticsExporter
 import com.koom.monitor.analyzer.HprofAnalyzer
 import org.slf4j.LoggerFactory
 import picocli.CommandLine
@@ -52,10 +53,21 @@ class MemMonitorCommand : Runnable {
     )
     private var largeOnly: Boolean = false
 
+    @CommandLine.Option(
+        names = ["--export-compare-json"],
+        description = ["仅导出全局诊断对比 JSON（与 hprof_parser.py 校验用），不生成完整报告"]
+    )
+    private var exportCompareJson: String? = null
+
     override fun run() {
         val actualHprofPath = Paths.get(hprofPath)
         if (!actualHprofPath.exists()) {
             println("❌ hprof文件不存在: $hprofPath")
+            return
+        }
+
+        if (!exportCompareJson.isNullOrBlank()) {
+            runExportCompareJson(actualHprofPath.toFile(), Paths.get(exportCompareJson!!))
             return
         }
 
@@ -136,6 +148,20 @@ class MemMonitorCommand : Runnable {
             logger.error("分析失败", e)
             println("❌ 分析失败: ${e.message}")
             e.printStackTrace()
+        }
+    }
+
+    private fun runExportCompareJson(hprofFile: java.io.File, outputJson: java.nio.file.Path) {
+        println("📤 导出全局诊断对比 JSON（mem-analyze / Shark）...")
+        val start = System.currentTimeMillis()
+        try {
+            CompareDiagnosticsExporter.export(hprofFile, outputJson)
+            println("✅ 已写入: ${outputJson.toAbsolutePath()} (${System.currentTimeMillis() - start}ms)")
+        } catch (e: Exception) {
+            logger.error("导出对比 JSON 失败", e)
+            println("❌ 导出失败: ${e.message}")
+            e.printStackTrace()
+            kotlin.system.exitProcess(1)
         }
     }
 }

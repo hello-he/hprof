@@ -108,7 +108,9 @@ update-mime-database ~/.local/share/mime
 
 ## 更新
 
-如果 jar 文件位置改变了，只需要更新脚本中的路径：
+将新构建的 `mem-analyze-1.0.0-all.jar` 复制覆盖到 `~/.local/bin/`（与 `mem-analyze.sh` 同目录）即可升级右键使用的版本；或在仓库执行 `./scripts/package-right-click-menu.sh` 后把 `right-click-menu/mem-analyze-1.0.0-all.jar` 拷到该目录。
+
+如果 jar 文件位置或文件名改变了，需要更新脚本中的路径：
 
 ```bash
 nano ~/.local/bin/mem-analyze.sh

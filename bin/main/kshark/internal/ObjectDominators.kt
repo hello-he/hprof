@@ -134,6 +134,15 @@ class ObjectDominators {
     }
   }
 
+  /**
+   * Full heap dominator tree with retained sizes (same pipeline as [renderDominatorTree]).
+   * Exposed for mem-analyze global diagnostics alignment with external retained-size heuristics.
+   */
+  internal fun buildFullDominatorTreeMap(
+    graph: HeapGraph,
+    ignoredRefs: List<IgnoredReferenceMatcher> = emptyList()
+  ): Map<Long, DominatorNode> = buildDominatorTree(graph, ignoredRefs)
+
   private fun buildDominatorTree(
     graph: HeapGraph,
     ignoredRefs: List<IgnoredReferenceMatcher>

@@ -95,14 +95,8 @@ class HprofAnalyzer {
         // 使用File.openHeapGraph扩展函数
         hprofFile.openHeapGraph(
             proguardMapping = null,
-            indexedGcRootTypes = setOf(
-                HprofRecordTag.ROOT_JNI_GLOBAL,
-                HprofRecordTag.ROOT_JNI_LOCAL,
-                HprofRecordTag.ROOT_NATIVE_STACK,
-                HprofRecordTag.ROOT_STICKY_CLASS,
-                HprofRecordTag.ROOT_THREAD_BLOCK,
-                HprofRecordTag.ROOT_THREAD_OBJECT
-            )
+            // 与 hprof_parser.py 一致：索引全部 GC Root 类型以便统计与支配树遍历
+            indexedGcRootTypes = HprofRecordTag.rootTags
         ).use { graph ->
             val stats = Statistics()
             val filterInstanceStartTime = System.currentTimeMillis()
@@ -143,6 +137,7 @@ class HprofAnalyzer {
 
             // 收集Bitmap信息（用于后续查找泄露对象中的Bitmap）
             val bitmapMap = collectBitmapInfo(graph, bitmapClass, stats)
+            val globalDiagnostics = GlobalDiagnosticsAnalyzer().analyze(graph)
 
             // 创建自定义的LeakingObjectFinder - 检测真正的泄露 + 大对象
             val leakingObjectFinder = object : LeakingObjectFinder {
@@ -457,7 +452,8 @@ class HprofAnalyzer {
                 classStatistics = classStatistics,
                 largeObjects = allLargeObjects,
                 filterInstanceTime = filterInstanceTime,
-                findGCPathTime = findGCPathTime
+                findGCPathTime = findGCPathTime,
+                globalDiagnostics = globalDiagnostics
             )
         }
     }
@@ -1371,7 +1367,8 @@ class HprofAnalyzer {
         val classStatistics: List<ClassStatistics> = emptyList(),
         val largeObjects: List<LargeObject> = emptyList(),
         val filterInstanceTime: Long = 0,
-        val findGCPathTime: Long = 0
+        val findGCPathTime: Long = 0,
+        val globalDiagnostics: GlobalDiagnosticsResult = GlobalDiagnosticsResult.empty()
     ) {
         fun printReport(hasBitmapAnalysis: Boolean = false) {
             println()
@@ -1448,6 +1445,8 @@ class HprofAnalyzer {
                 println("   (Bitmap详细分析请查看 bitmap_analysis.html)")
             }
             println()
+
+            printGlobalDiagnostics()
 
             // 泄露类型统计（与类实例统计一致：按类汇总实际泄露实例数，不含同类 45 条上限）
             val summaryActivity = classStatistics.filter { it.className.contains("Activity") && !it.className.contains("ActivityThread") }.sumOf { it.leakInstanceCount }
@@ -1571,6 +1570,67 @@ class HprofAnalyzer {
             }
         }
 
+        private fun printGlobalDiagnostics() {
+            if (!globalDiagnostics.hasFindings) return
+
+            println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            println("🔎 全局诊断")
+            println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            if (globalDiagnostics.gcRootStats.totalCount > 0) {
+                println("   GC Root 分布: ${globalDiagnostics.gcRootStats.totalCount} 个")
+                globalDiagnostics.gcRootStats.topTypes.take(5).forEach {
+                    val hint = globalDiagnosticsGcRootDescriptionByType[it.type]
+                    val short = hint?.let { h -> if (h.length > 52) h.take(52) + "…" else h }
+                    println("      - ${it.type}: ${it.count}${short?.let { s -> " — $s" } ?: ""}")
+                }
+            }
+            if (globalDiagnostics.packageClassDistribution.topPackages.isNotEmpty()) {
+                println("   Top 包分布:")
+                globalDiagnostics.packageClassDistribution.topPackages.take(5).forEach {
+                    println("      - ${it.name}: ${it.instanceCount} 个, ${stats.formatSize(it.totalShallowBytes)}")
+                }
+            }
+            if (globalDiagnostics.largeArrays.isNotEmpty()) {
+                println("   大对象持有链:")
+                globalDiagnostics.largeArrays.take(5).forEach { array ->
+                    println("      - ${array.arrayType} ${stats.formatSize(array.sizeBytes)} @${array.objectId}")
+                    array.holderChain.take(2).forEach { holder ->
+                        println("        ← ${holder.className}.${holder.referenceName} [${holder.referenceType}]")
+                    }
+                }
+            }
+            if (globalDiagnostics.staticHoldings.isNotEmpty()) {
+                println("   Static / singleton holdings:")
+                globalDiagnostics.staticHoldings.take(5).forEach {
+                    println(
+                        "      - [${it.category}] ${it.className}.${it.fieldName} -> ${it.targetClassName}: " +
+                            "Retained ${stats.formatSize(it.retainedSizeBytes)} [${it.riskLevel}]"
+                    )
+                }
+            }
+            if (globalDiagnostics.accumulationPoints.isNotEmpty()) {
+                println("   Accumulation points (dominator tree):")
+                globalDiagnostics.accumulationPoints.take(5).forEach {
+                    println("      - ${it.className}: ${it.reason}")
+                }
+                val glossarySb = StringBuilder()
+                appendDominatorHeapGlossaryText(glossarySb)
+                glossarySb.toString().trimEnd().lines().forEach { println(it) }
+            }
+            if (globalDiagnostics.optimizationSuggestions.isNotEmpty()) {
+                println()
+                println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                println("💡 优化建议")
+                println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                globalDiagnostics.optimizationSuggestions.take(8).forEach {
+                    println("   [${it.priority}] ${it.title}")
+                    println("      ${it.detail}")
+                    println("      建议: ${it.suggestion}")
+                }
+            }
+            println()
+        }
+
         /**
          * 保存报告到文件
          */
@@ -1684,6 +1744,8 @@ class HprofAnalyzer {
             }
             sb.appendLine()
 
+            appendGlobalDiagnosticsText(sb)
+
             // 泄露类型统计（与类实例统计一致：按类汇总实际泄露实例数，不含同类 45 条上限）
             val summaryActivity = classStatistics.filter { it.className.contains("Activity") && !it.className.contains("ActivityThread") }.sumOf { it.leakInstanceCount }
             val summaryFragment = classStatistics.filter { it.className.contains("Fragment") && it.className != REPORT_FRAGMENT_CLASS_NAME }.sumOf { it.leakInstanceCount }
@@ -1712,11 +1774,11 @@ class HprofAnalyzer {
                 sb.appendLine()
             }
 
-            // 大对象列表
+            // 大对象列表（始终输出区块标题，便于报告检索与测试稳定）
+            sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            sb.appendLine("📦 大对象列表 (${largeObjects.size} 个)")
+            sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             if (largeObjects.isNotEmpty()) {
-                sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                sb.appendLine("📦 大对象列表 (${largeObjects.size} 个)")
-                sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 largeObjects.sortedByDescending { it.size }.take(20).forEach { obj ->
                     sb.appendLine("   ${obj.className}")
                     sb.appendLine("      大小: ${stats.formatSize(obj.size)}")
@@ -1725,8 +1787,10 @@ class HprofAnalyzer {
                     }
                     sb.appendLine("      ObjectId: ${obj.objectId}")
                 }
-                sb.appendLine()
+            } else {
+                sb.appendLine("   （当前无符合条件的大对象）")
             }
+            sb.appendLine()
 
             if (leakingObjects.isNotEmpty()) {
                 sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -1804,6 +1868,294 @@ class HprofAnalyzer {
             }
 
             return sb.toString()
+        }
+
+        private fun appendGlobalDiagnosticsText(sb: StringBuilder) {
+            if (!globalDiagnostics.hasFindings) return
+
+            sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            sb.appendLine("🔎 全局诊断")
+            sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            if (globalDiagnostics.gcRootStats.totalCount > 0) {
+                sb.appendLine("   GC Root 分布 (${globalDiagnostics.gcRootStats.totalCount} 个):")
+                val typeColW = globalDiagnostics.gcRootStats.topTypes.take(8).maxOf { it.type.length }.coerceAtLeast(4)
+                sb.appendLine("   ${"Type".padEnd(typeColW)}  ${"Count".padEnd(8)}  Note (中文)")
+                sb.appendLine("   ${"-".repeat(typeColW)}  ${"-".repeat(8)}  ${"-".repeat(50)}")
+                globalDiagnostics.gcRootStats.topTypes.take(8).forEach { entry ->
+                    val desc = globalDiagnosticsGcRootDescriptionByType[entry.type] ?: "—"
+                    sb.appendLine("   ${entry.type.padEnd(typeColW)}  ${entry.count.toString().padEnd(8)}  $desc")
+                }
+                sb.appendLine()
+            }
+            if (globalDiagnostics.packageClassDistribution.topPackages.isNotEmpty()) {
+                sb.appendLine("   Top 包分布:")
+                globalDiagnostics.packageClassDistribution.topPackages.take(8).forEach {
+                    sb.appendLine("      - ${it.name}: ${it.instanceCount} 个, ${stats.formatSize(it.totalShallowBytes)} [${it.category}]")
+                }
+                sb.appendLine()
+            }
+            if (globalDiagnostics.packageClassDistribution.topClasses.isNotEmpty()) {
+                sb.appendLine("   Top 类分布:")
+                globalDiagnostics.packageClassDistribution.topClasses.take(8).forEach {
+                    sb.appendLine("      - ${it.name}: ${it.instanceCount} 个, ${stats.formatSize(it.totalShallowBytes)} [${it.category}]")
+                }
+                sb.appendLine()
+            }
+            if (globalDiagnostics.largeArrays.isNotEmpty()) {
+                sb.appendLine("   大对象持有链:")
+                globalDiagnostics.largeArrays.take(8).forEach { array ->
+                    sb.appendLine("      - ${array.arrayType} ${stats.formatSize(array.sizeBytes)} @${array.objectId}")
+                    sb.appendLine("        用途推断: ${array.inferredUsage}")
+                    array.holderChain.take(3).forEach { holder ->
+                        sb.appendLine("        ← ${holder.className}.${holder.referenceName} [${holder.referenceType}]")
+                    }
+                }
+                sb.appendLine()
+            }
+            if (globalDiagnostics.duplicateStrings.isNotEmpty()) {
+                sb.appendLine("   重复 String:")
+                globalDiagnostics.duplicateStrings.take(8).forEach {
+                    sb.appendLine("      - \"${it.preview}\": ${it.count} 次, 估算浪费 ${stats.formatSize(it.estimatedWasteBytes)}")
+                }
+                sb.appendLine()
+            }
+            if (globalDiagnostics.collectionInfos.isNotEmpty()) {
+                sb.appendLine("   集合诊断:")
+                globalDiagnostics.collectionInfos.take(8).forEach {
+                    sb.appendLine("      - ${it.className}: size=${it.size}, capacity=${it.capacity ?: "unknown"}, wasted=${it.wastedCapacity} [${it.riskLevel}]")
+                }
+                sb.appendLine()
+            }
+            if (globalDiagnostics.lruCacheInfos.isNotEmpty()) {
+                sb.appendLine("   LruCache 诊断:")
+                globalDiagnostics.lruCacheInfos.take(8).forEach {
+                    sb.appendLine(
+                        "      - ${it.className}: size=${it.size}/${it.maxSize}, 命中率=${formatLruHitRate(it.hitRate)}, " +
+                            "利用率=${formatLruUtilization(it.size, it.utilization)} [${it.riskLevel}]"
+                    )
+                }
+                sb.appendLine()
+            }
+            if (globalDiagnostics.staticHoldings.isNotEmpty()) {
+                sb.appendLine("   Static / singleton holdings (retained thresholds):")
+                globalDiagnostics.staticHoldings.take(8).forEach {
+                    sb.appendLine(
+                        "      - [${it.category}] ${it.className}.${it.fieldName} -> ${it.targetClassName} @${it.targetObjectId}, " +
+                            "Retained ${stats.formatSize(it.retainedSizeBytes)}, Shallow ${stats.formatSize(it.shallowSizeBytes)} [${it.riskLevel}]"
+                    )
+                }
+                sb.appendLine()
+            }
+            if (globalDiagnostics.accumulationPoints.isNotEmpty()) {
+                sb.appendLine("   Accumulation points (dominator tree):")
+                globalDiagnostics.accumulationPoints.take(8).forEach {
+                    sb.appendLine(
+                        "      - ${it.className} @${it.objectId} [${it.riskLevel}] Retained ${stats.formatSize(it.estimatedRetainedBytes)}"
+                    )
+                    sb.appendLine("        Reason: ${it.reason}")
+                }
+                appendDominatorHeapGlossaryText(sb)
+            }
+            if (globalDiagnostics.optimizationSuggestions.isNotEmpty()) {
+                sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                sb.appendLine("💡 优化建议")
+                sb.appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                globalDiagnostics.optimizationSuggestions.take(10).forEach {
+                    sb.appendLine("   [${it.priority}] ${it.title}")
+                    sb.appendLine("      ${it.detail}")
+                    sb.appendLine("      建议: ${it.suggestion}")
+                }
+                sb.appendLine()
+            }
+        }
+
+        private fun appendGlobalDiagnosticsHtml(
+            sb: StringBuilder,
+            escapeHtml: (String?) -> String
+        ) {
+            if (!globalDiagnostics.hasFindings) return
+
+            sb.appendLine("        <div class=\"section\" id=\"global-diagnostics\">")
+            sb.appendLine("            <div class=\"section-title collapsible\" onclick=\"toggleSection(this)\">")
+            sb.appendLine("                <span class=\"icon\">🔎</span>全局诊断")
+            sb.appendLine("            </div>")
+            sb.appendLine("            <div class=\"collapsible-content\">")
+
+            if (globalDiagnostics.gcRootStats.totalCount > 0) {
+                sb.appendLine("                <h3 style=\"margin: 12px 0;\">GC Root 分布</h3>")
+                appendSimpleTable(
+                    sb,
+                    listOf("Type", "Count", "Note (中文)"),
+                    globalDiagnostics.gcRootStats.topTypes.take(8).map { entry ->
+                        listOf(
+                            "<code style=\"white-space: nowrap;\">${escapeHtml(entry.type)}</code>",
+                            entry.count.toString(),
+                            escapeHtml(globalDiagnosticsGcRootDescriptionByType[entry.type] ?: "—")
+                        )
+                    }
+                )
+            }
+
+            if (globalDiagnostics.packageClassDistribution.topPackages.isNotEmpty()) {
+                sb.appendLine("                <h3 style=\"margin: 18px 0 12px;\">Top 包分布</h3>")
+                appendSimpleTable(sb, listOf("Package", "Instances", "Shallow (sum)", "Category"), globalDiagnostics.packageClassDistribution.topPackages.take(8).map {
+                    listOf(escapeHtml(it.name), it.instanceCount.toString(), stats.formatSize(it.totalShallowBytes), escapeHtml(it.category))
+                })
+            }
+
+            if (globalDiagnostics.packageClassDistribution.topClasses.isNotEmpty()) {
+                sb.appendLine("                <h3 style=\"margin: 18px 0 12px;\">Top 类分布</h3>")
+                appendSimpleTable(sb, listOf("Class", "Instances", "Shallow (sum)", "Category"), globalDiagnostics.packageClassDistribution.topClasses.take(8).map {
+                    listOf(escapeHtml(it.name), it.instanceCount.toString(), stats.formatSize(it.totalShallowBytes), escapeHtml(it.category))
+                })
+            }
+
+            if (globalDiagnostics.largeArrays.isNotEmpty()) {
+                sb.appendLine("                <h3 style=\"margin: 18px 0 12px;\">大对象持有链</h3>")
+                appendSimpleTable(sb, listOf("ObjectId", "类型", "大小", "用途推断", "持有者"), globalDiagnostics.largeArrays.take(8).map { array ->
+                    val holders = array.holderChain.joinToString("<br>") {
+                        "${escapeHtml(it.className)}.${escapeHtml(it.referenceName)} [${escapeHtml(it.referenceType)}]"
+                    }.ifEmpty { "未找到直接持有者" }
+                    listOf(array.objectId.toString(), escapeHtml(array.arrayType), stats.formatSize(array.sizeBytes), escapeHtml(array.inferredUsage), holders)
+                })
+            }
+
+            if (globalDiagnostics.duplicateStrings.isNotEmpty()) {
+                sb.appendLine("                <h3 style=\"margin: 18px 0 12px;\">重复 String</h3>")
+                appendSimpleTable(sb, listOf("内容", "次数", "估算浪费"), globalDiagnostics.duplicateStrings.take(8).map {
+                    listOf(escapeHtml(it.preview), it.count.toString(), stats.formatSize(it.estimatedWasteBytes))
+                })
+            }
+
+            if (globalDiagnostics.collectionInfos.isNotEmpty()) {
+                sb.appendLine("                <h3 style=\"margin: 18px 0 12px;\">集合诊断</h3>")
+                appendSimpleTable(sb, listOf("类名", "size", "capacity", "浪费容量", "风险"), globalDiagnostics.collectionInfos.take(8).map {
+                    listOf(escapeHtml(it.className), it.size.toString(), it.capacity?.toString() ?: "unknown", it.wastedCapacity.toString(), it.riskLevel.toString())
+                })
+            }
+
+            if (globalDiagnostics.lruCacheInfos.isNotEmpty()) {
+                sb.appendLine("                <h3 style=\"margin: 18px 0 12px;\">LruCache 诊断</h3>")
+                appendSimpleTable(
+                    sb,
+                    listOf("类名", "size/max", "命中率", "利用率", "风险"),
+                    globalDiagnostics.lruCacheInfos.take(8).map {
+                        listOf(
+                            escapeHtml(it.className),
+                            "${it.size}/${it.maxSize}",
+                            formatLruHitRate(it.hitRate),
+                            formatLruUtilization(it.size, it.utilization),
+                            it.riskLevel.toString()
+                        )
+                    }
+                )
+            }
+
+            if (globalDiagnostics.staticHoldings.isNotEmpty()) {
+                sb.appendLine("                <h3 style=\"margin: 18px 0 12px;\">静态/单例持有风险</h3>")
+                appendSimpleTable(
+                    sb,
+                    listOf("Category", "Field", "Target", "Retained", "Shallow", "Risk"),
+                    globalDiagnostics.staticHoldings.take(8).map {
+                        listOf(
+                            escapeHtml(it.category.toString()),
+                            "${escapeHtml(it.className)}.${escapeHtml(it.fieldName)}",
+                            "${escapeHtml(it.targetClassName)} @${it.targetObjectId}",
+                            stats.formatSize(it.retainedSizeBytes),
+                            stats.formatSize(it.shallowSizeBytes),
+                            it.riskLevel.toString()
+                        )
+                    }
+                )
+            }
+
+            if (globalDiagnostics.accumulationPoints.isNotEmpty()) {
+                sb.appendLine("                <h3 style=\"margin: 18px 0 12px;\">Accumulation points (dominator tree)</h3>")
+                appendSimpleTable(
+                    sb,
+                    listOf("Class", "ObjectId", "Reason", "Retained", "Risk"),
+                    globalDiagnostics.accumulationPoints.take(8).map {
+                        listOf(
+                            escapeHtml(it.className),
+                            it.objectId.toString(),
+                            escapeHtml(it.reason),
+                            stats.formatSize(it.estimatedRetainedBytes),
+                            it.riskLevel.toString()
+                        )
+                    }
+                )
+                appendDominatorHeapGlossaryHtml(sb)
+            }
+
+            if (globalDiagnostics.optimizationSuggestions.isNotEmpty()) {
+                sb.appendLine("                <h3 style=\"margin: 18px 0 12px;\">优化建议</h3>")
+                appendSimpleTable(sb, listOf("优先级", "问题", "详情", "建议"), globalDiagnostics.optimizationSuggestions.take(10).map {
+                    listOf(it.priority.toString(), escapeHtml(it.title), escapeHtml(it.detail), escapeHtml(it.suggestion))
+                })
+            }
+
+            sb.appendLine("            </div>")
+            sb.appendLine("        </div>")
+        }
+
+        private fun appendSimpleTable(
+            sb: StringBuilder,
+            headers: List<String>,
+            rows: List<List<String>>
+        ) {
+            if (rows.isEmpty()) return
+            sb.appendLine("                <table class=\"data-table\">")
+            sb.appendLine("                    <thead><tr>")
+            headers.forEach { sb.appendLine("                        <th>$it</th>") }
+            sb.appendLine("                    </tr></thead>")
+            sb.appendLine("                    <tbody>")
+            rows.forEach { row ->
+                sb.appendLine("                    <tr>")
+                row.forEach { cell -> sb.appendLine("                        <td>$cell</td>") }
+                sb.appendLine("                    </tr>")
+            }
+            sb.appendLine("                    </tbody>")
+            sb.appendLine("                </table>")
+        }
+
+        private fun formatPercent(value: Double?): String {
+            return value?.let { "%.1f%%".format(it * 100) } ?: "unknown"
+        }
+
+        /** LruCache：无 hit/miss 字段时不应显示为「unknown」以免误解为命中率差 */
+        private fun formatLruHitRate(hitRate: Double?): String {
+            return hitRate?.let { "%.1f%%".format(it * 100) } ?: "无统计"
+        }
+
+        /** 空缓存时 0% 利用率易误解，标为「—」 */
+        private fun formatLruUtilization(size: Int, utilization: Double?): String {
+            if (size == 0) return "—"
+            return utilization?.let { "%.1f%%".format(it * 100) } ?: "—"
+        }
+
+        private fun appendDominatorHeapGlossaryText(sb: StringBuilder) {
+            sb.appendLine("   Glossary (中文注释):")
+            sb.appendLine("      Retained — 保留大小：若该对象从根引用链上可被回收，其支配子图中一并释放的内存估计量。")
+            sb.appendLine("      Shallow — 浅对象大小：仅该对象自身在堆中的大小（shallow heap size）；不是 Kotlin Multiplatform 的 Shadow。")
+            sb.appendLine("      Shallow (sum) — 表「Top packages/classes」列：该包或类下所有实例浅大小之和。")
+            sb.appendLine("      retained/shallow ratio — 保留大小 ÷ 浅大小；比值大表示小块对象「兜住」大块子图。")
+            sb.appendLine("      directDominatedCount — 支配树中由该对象直接支配的对象个数（与 UI 子 View 数量不是同一含义）。")
+            sb.appendLine("      Dominator tree — 支配树：用于计算 retained 与上述比值。")
+            sb.appendLine()
+        }
+
+        private fun appendDominatorHeapGlossaryHtml(sb: StringBuilder) {
+            sb.appendLine(
+                "                <p style=\"margin: 10px 0 0; font-size: 12px; color: #555; line-height: 1.55;\">" +
+                    "<strong>Glossary (中文注释)：</strong><br>" +
+                    "<strong>Retained</strong> — 保留大小：若该对象从根引用链上可被回收，其支配子图中一并释放的内存估计量。<br>" +
+                    "<strong>Shallow</strong> — 浅对象大小：仅该对象自身在堆中的大小（shallow heap size）；<em>不是</em> Kotlin Multiplatform 的 Shadow。<br>" +
+                    "<strong>Shallow (sum)</strong> — 「Top packages/classes」表列：该包或类下所有实例浅大小之和。<br>" +
+                    "<strong>retained/shallow ratio</strong> — 保留大小 ÷ 浅大小；比值大表示小块对象「兜住」大块子图。<br>" +
+                    "<strong>directDominatedCount</strong> — 支配树中由该对象直接支配的对象个数（与 UI 子 View 数量不是同一含义）。<br>" +
+                    "<strong>Dominator tree</strong> — 支配树：用于计算 retained 与上述比值。" +
+                    "</p>"
+            )
         }
 
         private fun generateHtmlReport(bitmapOutputDir: Path?, hasBitmapAnalysis: Boolean = false): String {
@@ -2010,6 +2362,7 @@ class HprofAnalyzer {
             }
             if (stats.threadCount > 0) sb.appendLine("                <a href=\"#thread-stats\" class=\"nav-link\">线程统计</a>")
             sb.appendLine("                <a href=\"#bitmap-stats\" class=\"nav-link\">Bitmap统计</a>")
+            if (globalDiagnostics.hasFindings) sb.appendLine("                <a href=\"#global-diagnostics\" class=\"nav-link\">全局诊断</a>")
             sb.appendLine("                <a href=\"#statistics\" class=\"nav-link\">其他统计</a>")
             sb.appendLine("            </div>")
             sb.appendLine("        </div>")
@@ -2179,22 +2532,22 @@ class HprofAnalyzer {
                 sb.appendLine("        </div>")
             }
 
-            // 3. 大对象列表
+            // 3. 大对象列表（始终输出，与文本报告一致）
+            sb.appendLine("        <div class=\"section leak-section\" id=\"large-objects\">")
+            sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📦</span>大对象列表 (${largeObjects.size} 个)</div>")
+            sb.appendLine("            <div style=\"margin-bottom: 15px; padding: 10px; background: #fff3e0; border-radius: 4px; border-left: 3px solid #ff9800; font-size: 12px; color: #666;\">")
+            sb.appendLine("                <strong>说明:</strong> 此列表显示所有大对象（Bitmap>1M像素, ByteArray>1MB），包括正常使用的和泄露的。")
+            sb.appendLine("            </div>")
+            sb.appendLine("            <table class=\"data-table\">")
+            sb.appendLine("                <thead>")
+            sb.appendLine("                    <tr>")
+            sb.appendLine("                        <th>类名</th>")
+            sb.appendLine("                        <th>大小</th>")
+            sb.appendLine("                        <th>详情</th>")
+            sb.appendLine("                    </tr>")
+            sb.appendLine("                </thead>")
+            sb.appendLine("                <tbody>")
             if (largeObjects.isNotEmpty()) {
-                sb.appendLine("        <div class=\"section leak-section\" id=\"large-objects\">")
-                sb.appendLine("            <div class=\"section-title\"><span class=\"icon\">📦</span>大对象列表 (${largeObjects.size} 个)</div>")
-                sb.appendLine("            <div style=\"margin-bottom: 15px; padding: 10px; background: #fff3e0; border-radius: 4px; border-left: 3px solid #ff9800; font-size: 12px; color: #666;\">")
-                sb.appendLine("                <strong>说明:</strong> 此列表显示所有大对象（Bitmap>1M像素, ByteArray>1MB），包括正常使用的和泄露的。")
-                sb.appendLine("            </div>")
-                sb.appendLine("            <table class=\"data-table\">")
-                sb.appendLine("                <thead>")
-                sb.appendLine("                    <tr>")
-                sb.appendLine("                        <th>类名</th>")
-                sb.appendLine("                        <th>大小</th>")
-                sb.appendLine("                        <th>详情</th>")
-                sb.appendLine("                    </tr>")
-                sb.appendLine("                </thead>")
-                sb.appendLine("                <tbody>")
                 largeObjects.sortedByDescending { it.size }.take(20).forEach { obj ->
                     sb.appendLine("                    <tr>")
                     sb.appendLine("                        <td>${escapeHtml(obj.className)}</td>")
@@ -2202,10 +2555,12 @@ class HprofAnalyzer {
                     sb.appendLine("                        <td>${obj.extDetail ?: "-"}</td>")
                     sb.appendLine("                    </tr>")
                 }
-                sb.appendLine("                </tbody>")
-                sb.appendLine("            </table>")
-                sb.appendLine("        </div>")
+            } else {
+                sb.appendLine("                    <tr><td colspan=\"3\">（当前无符合条件的大对象）</td></tr>")
             }
+            sb.appendLine("                </tbody>")
+            sb.appendLine("            </table>")
+            sb.appendLine("        </div>")
 
             // 4. 大对象统计
             if (stats.leakedBitmapCount > 0 || stats.leakedByteArrayCount > 0) {
@@ -2317,6 +2672,8 @@ class HprofAnalyzer {
             }
             sb.appendLine("            </div>")
             sb.appendLine("        </div>")
+
+            appendGlobalDiagnosticsHtml(sb, ::escapeHtml)
 
             // 7. 无泄露提示
             if (leakingObjects.isEmpty()) {
@@ -2541,3 +2898,28 @@ class HprofAnalyzer {
         val extDetail: String? = null  // 额外详情，如Bitmap尺寸 "1440x3200"
     )
 }
+
+/**
+ * 全局诊断报告里 GC Root 枚举名的中文简要说明（与全局诊断中的根类型字符串一致）
+ */
+private val globalDiagnosticsGcRootLegendZh: List<Pair<String, String>> = listOf(
+    "VM_INTERNAL" to "虚拟机/ART 内部图锚点；dump 里数量常很大，多为正常元数据而非业务泄漏。",
+    "INTERNED_STRING" to "与字符串驻留/常量池相关；大量出现多与类加载、重复字面量有关。",
+    "STICKY_CLASS" to "类元数据「粘性」根；含 static 所在 Class，常与静态持有链一起看。",
+    "JAVA_FRAME" to "某线程 Java 栈帧上的局部变量仍存活；对应线程栈引用。",
+    "JNI_GLOBAL" to "Native 层 JNI 全局引用（GlobalRef 等）；检查 native/三方 SDK 是否长期持有 Java 对象。",
+    "JNI_LOCAL" to "JNI 本地帧上的局部引用。",
+    "THREAD_OBJ" to "线程对象作为根；线程未结束则其栈上对象可达。",
+    "NATIVE_STACK" to "Native 栈上的引用。",
+    "THREAD_BLOCK" to "线程阻塞/同步相关根。",
+    "MONITOR_USED" to "正持有监视器（synchronized）的对象。",
+    "JNI_MONITOR" to "JNI MonitorEnter 关联的监视器。",
+    "REFERENCE_CLEANUP" to "引用对象清理路径上的根。",
+    "FINALIZING" to "尚待在 finalize 队列中处理的可达对象。",
+    "DEBUGGER" to "调试器附加时保留的对象。",
+    "UNREACHABLE" to "dump 中标记为不可达的特殊节点（分析用）；一般不当作真实 GC 根。",
+    "UNKNOWN" to "未识别的根类型。"
+)
+
+private val globalDiagnosticsGcRootDescriptionByType: Map<String, String> =
+    globalDiagnosticsGcRootLegendZh.associate { it.first to it.second }

@@ -248,11 +248,11 @@ dump_fd_info() {
     local output_file="$2"
     
     if [ -z "$pid" ] || [ ! -d "/proc/$pid/fd" ]; then
-        echo "  ✗ 无法访问 /proc/$pid/fd"
+        echo "  错误: 无法访问 /proc/$pid/fd"
         return 1
     fi
     
-    echo "  正在 dump FD 信息..."
+    echo "  正在收集 FD 信息..."
     
     # 读取所有 FD 的链接目标（参考 KOOM）
     local fd_list=""
@@ -300,11 +300,9 @@ dump_fd_info() {
         fi
         
         if [ -f "$output_file" ]; then
-            echo "  ✓ FD 信息已保存: $output_file (共 $fd_count 个 FD)"
-            echo "    FD 统计: 文件=$file_count, socket=$socket_count, pipe=$pipe_count, anon=$anon_count"
-            
-            # 显示最常见的文件 FD（前 10 个，排除 socket/pipe/anon）
-            echo "    最常见的文件 FD (前10个):"
+            echo "  FD 已保存: $output_file (共 $fd_count 个)"
+            echo "    统计: 文件=$file_count, socket=$socket_count, pipe=$pipe_count, anon=$anon_count"
+            echo "    文件 FD Top10:"
             local file_fds=$(echo -e "$fd_list" | grep "^/")
             if [ -n "$file_fds" ]; then
                 # 统计每个路径出现的次数，显示最常见的（如果 uniq 可用）
@@ -343,11 +341,11 @@ dump_fd_info() {
             
             return 0
         else
-            echo "  ✗ 保存 FD 信息失败"
+            echo "  错误: 保存 FD 信息失败"
             return 1
         fi
     else
-        echo "  ✗ 未找到 FD 信息"
+        echo "  错误: 未找到 FD 信息"
         return 1
     fi
 }
@@ -414,18 +412,18 @@ perform_dump() {
         done
         
         local file_size=$((curr_size / 1024 / 1024))
-        echo "  ✓ Dump 完成: ${file_size}MB"
+        echo "  Dump 完成: ${file_size}MB"
         echo ""
-        echo "  后续分析命令:"
+        echo "  分析:"
         echo "    adb pull $hprof_file ./"
         if echo "$reason" | grep -q "文件句柄"; then
             echo "    adb pull $fd_file ./"
-            echo "    # 注意: hprof 文件不包含 FD 信息，请查看 fd_*.txt 文件"
+            echo "    # hprof 不含 FD 信息，请一并查看 fd_*.txt"
         fi
         echo "    java -jar mem-analyze-1.0.0-all.jar -f $(basename $hprof_file)"
         echo ""
     else
-        echo "  ✗ Dump 失败: 文件未生成"
+        echo "  错误: Dump 失败，文件未生成"
     fi
     
     echo "=========================================="
@@ -434,38 +432,43 @@ perform_dump() {
 
 # 主监控循环
 main() {
-    echo ""
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║      mem-analyze 设备端内存监控                              ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
-    echo ""
-    echo "📱 设备: $(getprop ro.product.model)"
-    echo "🎯 监控包名: $PACKAGE_LIST"
-    echo ""
-    echo "⚙️  配置:"
-    echo "   堆内存阈值: ${HEAP_THRESHOLD}% (连续${TRIGGER_COUNT}次触发)"
-    echo "   FD 阈值: ${FD_THRESHOLD} (连续${TRIGGER_COUNT}次触发)"
-    echo "   线程阈值: ${THREAD_THRESHOLD} (连续${TRIGGER_COUNT}次触发)"
-    echo "   堆高水位线: ${HEAP_HIGH_WATERMARK}% (立即触发)"
-    echo "   堆增量阈值: ${HEAP_DELTA_THRESHOLD_MB}MB (立即触发)"
-    echo "   监控间隔: ${INTERVAL}秒"
-    echo "   输出目录: $OUTPUT_DIR"
-    echo "   dump前GC: $USE_GC"
-    echo "   包含bitmap: $USE_BITMAP"
-    if [ "$MAX_ITERATIONS" -gt 0 ]; then
-        echo "   最大监控次数: $MAX_ITERATIONS"
-    else
-        echo "   最大监控次数: 无限"
-    fi
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  按 Ctrl+C 停止监控"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    
     # 包数量（用于多包名时按包维护状态）
     set -- $PACKAGE_LIST
     local num_packages=$#
+
+    echo ""
+    echo "=============================================="
+    echo "  mem-analyze 设备端内存监控"
+    echo "=============================================="
+    echo ""
+    echo "设备: $(getprop ro.product.model)"
+    echo "监控包数: $num_packages"
+    for _pkg in $PACKAGE_LIST; do
+        echo "  - $_pkg"
+    done
+    echo ""
+    echo "配置:"
+    echo "  堆内存阈值: ${HEAP_THRESHOLD}% (连续 ${TRIGGER_COUNT} 次触发)"
+    echo "  FD 阈值: ${FD_THRESHOLD} (连续 ${TRIGGER_COUNT} 次触发)"
+    echo "  线程阈值: ${THREAD_THRESHOLD} (连续 ${TRIGGER_COUNT} 次触发)"
+    echo "  堆高水位线: ${HEAP_HIGH_WATERMARK}% (立即触发)"
+    echo "  堆增量阈值: ${HEAP_DELTA_THRESHOLD_MB}MB (立即触发)"
+    echo "  监控间隔: ${INTERVAL}s"
+    echo "  输出目录: $OUTPUT_DIR"
+    echo "  dump 前 GC: $USE_GC"
+    echo "  包含 bitmap: $USE_BITMAP"
+    if [ "$MAX_ITERATIONS" -gt 0 ]; then
+        echo "  最大轮次: $MAX_ITERATIONS"
+    else
+        echo "  最大轮次: 无限"
+    fi
+    echo ""
+    if [ "$num_packages" -gt 1 ]; then
+        echo "说明: 列表内谁先启动就监控谁，未启动的包会跳过。"
+    fi
+    echo "按 Ctrl+C 停止监控"
+    echo "----------------------------------------------"
+    echo ""
     
     # 多包名时初始化每包状态（使用 eval 按索引存储）
     local idx=0
@@ -480,11 +483,6 @@ main() {
         idx=$((idx + 1))
     done
     
-    # 多包名时说明：谁先启动就监控谁，不要求全部启动（适配 monkey 随机启动）
-    if [ "$num_packages" -gt 1 ]; then
-        echo "📌 监控列表内谁先启动就监控谁，无需等全部应用启动"
-    fi
-    
     # 单包名时使用的上一次内存值（与多包名 eval 变量 prev_*_0 一致）
     local prev_heap_used=0
     local prev_heap_ratio=0
@@ -495,7 +493,7 @@ main() {
         # 检查最大迭代次数
         if [ "$MAX_ITERATIONS" -gt 0 ] && [ "$iteration" -ge "$MAX_ITERATIONS" ]; then
             echo ""
-            echo "✅ 达到最大监控次数 ($MAX_ITERATIONS)，监控结束"
+            echo "达到最大监控次数 ($MAX_ITERATIONS)，监控结束"
             break
         fi
         
@@ -506,7 +504,7 @@ main() {
             pid=$(get_pid "$pkg")
             
             if [ -z "$pid" ]; then
-                echo "[$iteration] $(get_time) | ⏳ $pkg 未启动（跳过，启动后会自动监控）"
+                echo "[$iteration] $(get_time) | $pkg | 未启动，跳过"
                 idx=$((idx + 1))
                 continue
             fi
@@ -558,17 +556,16 @@ main() {
             heap_ratio=$((heap_percent * 10))  # 百分比*10，例如 80% = 800
         fi
         
-        # 显示状态
-        local status_icon="📊"
+        # 显示状态（超阈值时加 WARN 前缀）
+        local status_tag=""
         if [ "$heap_percent" -ge "$HEAP_THRESHOLD" ] || [ "$fd_count" -gt "$FD_THRESHOLD" ] || [ "$thread_count" -gt "$THREAD_THRESHOLD" ]; then
-            status_icon="⚠️ "
+            status_tag="WARN "
         fi
-        
-            # 显示状态（多包名时带上包名）
+
             if [ "$num_packages" -gt 1 ]; then
-                echo "[$iteration] $(get_time) | $pkg | $status_icon 堆: ${heap_percent}% (${heap_used}KB/${heap_max}KB)$delta | 线程: $thread_count | FD: $fd_count"
+                echo "[$iteration] $(get_time) | $pkg | ${status_tag}堆 ${heap_percent}% (${heap_used}KB/${heap_max}KB)$delta | 线程 $thread_count | FD $fd_count"
             else
-                echo "[$iteration] $(get_time) | $status_icon 堆: ${heap_percent}% (${heap_used}KB/${heap_max}KB)$delta | 线程: $thread_count | FD: $fd_count"
+                echo "[$iteration] $(get_time) | ${status_tag}堆 ${heap_percent}% (${heap_used}KB/${heap_max}KB)$delta | 线程 $thread_count | FD $fd_count"
             fi
         
             # 检查触发条件（参考 KOOM 逻辑）
@@ -694,7 +691,7 @@ main() {
                     counts="线程:${thread_over_threshold_count}/${TRIGGER_COUNT}"
                 fi
             fi
-            echo "    ↳ 超过阈值! (连续: $counts)"
+            echo "    超过阈值 (连续: $counts)"
         fi
         
             # 触发 dump（使用当前包名 pkg）
@@ -732,7 +729,7 @@ main() {
 }
 
 # 捕获 Ctrl+C
-trap 'echo ""; echo ""; echo "✅ 监控已停止"; echo "   hprof 文件位置: $OUTPUT_DIR"; exit 0' INT TERM
+trap 'echo ""; echo "监控已停止"; echo "hprof 目录: $OUTPUT_DIR"; exit 0' INT TERM
 
 # 启动主循环
 main

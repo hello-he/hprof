@@ -4,7 +4,9 @@
 #
 # 功能：
 #   1. 将 device-watch.sh 推送到设备并设置权限
-#   2. 可选：通过 package_list.txt 指定包名列表，生成并推送启动脚本
+#   2. 可选：根据 package_list.txt 生成并推送 run-device-watch.sh
+#
+# 说明：本脚本只负责部署，不会自动启动监控。
 #
 # 使用方法：
 #   ./deploy-device-watch.sh [选项] [package_list.txt]
@@ -30,7 +32,6 @@ ADB_SERIAL=""
 PACKAGE_LIST_FILE=""
 HAS_RUN_SCRIPT=0
 
-# 显示帮助
 show_help() {
     echo "=============================================="
     echo "  部署设备端内存监控工具"
@@ -43,8 +44,9 @@ show_help() {
     echo "  -f <文件>      包名列表文件（每行一个包名，# 为注释）"
     echo "  -h             显示帮助"
     echo ""
-    echo "若提供 package_list.txt（或 -f 指定），将生成并推送启动脚本，"
-    echo "设备上直接执行 run-device-watch.sh 即可按列表监控。"
+    echo "本脚本只部署，不启动监控。"
+    echo "若提供 package_list.txt（或 -f），会额外生成 $RUN_SCRIPT_NAME，"
+    echo "部署完成后按提示执行 adb shell 命令即可启动。"
     echo ""
     echo "示例:"
     echo "  $0"
@@ -54,7 +56,6 @@ show_help() {
     exit 0
 }
 
-# 解析参数
 while getopts "s:f:h" opt; do
     case $opt in
         s) ADB_SERIAL="$OPTARG" ;;
@@ -64,29 +65,27 @@ while getopts "s:f:h" opt; do
     esac
 done
 shift $((OPTIND - 1))
-#  positional 包名列表文件
+
 if [ -n "$1" ] && [ -z "$PACKAGE_LIST_FILE" ]; then
     PACKAGE_LIST_FILE="$1"
 fi
 
-# 构建 adb 命令
 ADB_CMD="adb"
 if [ -n "$ADB_SERIAL" ]; then
     ADB_CMD="adb -s $ADB_SERIAL"
 fi
 
 echo ""
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║      部署设备端内存监控工具                                  ║"
-echo "╚══════════════════════════════════════════════════════════════╝"
+echo "=============================================="
+echo "  部署设备端内存监控工具"
+echo "=============================================="
 echo ""
 
-# 检查设备连接
-echo "📱 检查设备连接..."
+echo "检查设备连接..."
 if ! $ADB_CMD devices | grep -q "device$"; then
-    echo "❌ 未检测到已连接的设备"
+    echo "错误: 未检测到已连接的设备"
     echo ""
-    echo "请确保："
+    echo "请确保:"
     echo "  1. 设备已通过 USB 连接"
     echo "  2. USB 调试已启用"
     echo "  3. 已授权此电脑的调试请求"
@@ -94,59 +93,46 @@ if ! $ADB_CMD devices | grep -q "device$"; then
     exit 1
 fi
 
-# 必须先 adb root 成功才可以部署（需要写 /data/local/tmp 等）
-echo "🔐 检查 root 权限..."
+echo "检查 root 权限..."
 if ! $ADB_CMD root 2>/dev/null; then
-    echo "❌ adb root 执行失败"
+    echo "错误: adb root 执行失败"
     echo ""
-    echo "本脚本必须在使用 root 权限的设备上运行，请先确保："
-    echo "  1. 设备已 root，或为 eng/userdebug 版本"
-    echo "  2. 执行 adb root 后终端提示已切换为 root"
+    echo "本脚本需要 root（eng/userdebug 或已 root 设备）。"
     echo ""
     exit 1
 fi
-# 等待 root 生效（部分设备 adb root 后需短暂等待）
 sleep 1
 if ! $ADB_CMD shell id 2>/dev/null | grep -q "uid=0"; then
-    echo "❌ 当前无 root 权限（uid 不为 0）"
-    echo ""
-    echo "必须先 adb root 成功才可以继续部署。请检查设备是否已 root 或为 userdebug 镜像。"
+    echo "错误: 当前无 root 权限（uid 不为 0）"
     echo ""
     exit 1
 fi
-echo "   ✓ 已具备 root 权限"
+echo "已具备 root 权限"
 echo ""
 
 DEVICE_MODEL=$($ADB_CMD shell getprop ro.product.model 2>/dev/null | tr -d '\r')
 ANDROID_VERSION=$($ADB_CMD shell getprop ro.build.version.release 2>/dev/null | tr -d '\r')
-echo "   设备: $DEVICE_MODEL (Android $ANDROID_VERSION)"
+echo "设备: $DEVICE_MODEL (Android $ANDROID_VERSION)"
 echo ""
 
-# 检查脚本文件
 if [ ! -f "$DEVICE_SCRIPT" ]; then
-    echo "❌ 找不到设备端脚本: $DEVICE_SCRIPT"
+    echo "错误: 找不到设备端脚本: $DEVICE_SCRIPT"
     exit 1
 fi
 
-# 推送脚本到设备
-echo "📤 推送脚本到设备..."
+echo "[1/3] 推送 device-watch.sh ..."
 $ADB_CMD push "$DEVICE_SCRIPT" "$DEVICE_PATH/device-watch.sh"
 
-# 设置执行权限
-echo "🔧 设置执行权限..."
+echo "[2/3] 设置执行权限并创建输出目录 ..."
 $ADB_CMD shell chmod 755 "$DEVICE_PATH/device-watch.sh"
-
-# 创建输出目录
-echo "📁 创建输出目录..."
 $ADB_CMD shell mkdir -p "$DEVICE_PATH/mem-analyze"
 
-# 若指定了包名列表文件，生成并推送启动脚本
 if [ -n "$PACKAGE_LIST_FILE" ]; then
     if [ ! -f "$PACKAGE_LIST_FILE" ]; then
-        echo "❌ 包名列表文件不存在: $PACKAGE_LIST_FILE"
+        echo "错误: 包名列表文件不存在: $PACKAGE_LIST_FILE"
         exit 1
     fi
-    echo "📋 读取包名列表: $PACKAGE_LIST_FILE"
+    echo "[3/3] 根据 $PACKAGE_LIST_FILE 生成并推送 $RUN_SCRIPT_NAME ..."
     PACKAGES=()
     while IFS= read -r line || [ -n "$line" ]; do
         line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -155,11 +141,11 @@ if [ -n "$PACKAGE_LIST_FILE" ]; then
         PACKAGES+=("$line")
     done < "$PACKAGE_LIST_FILE"
     if [ ${#PACKAGES[@]} -eq 0 ]; then
-        echo "❌ 包名列表为空或仅有注释/空行"
+        echo "错误: 包名列表为空或仅有注释/空行"
         exit 1
     fi
-    echo "   共 ${#PACKAGES[@]} 个包名"
-    # 生成设备端启动脚本（调用 device-watch.sh -p pkg1 -p pkg2 ...）
+    echo "      共 ${#PACKAGES[@]} 个包名"
+
     RUN_SCRIPT_CONTENT="#!/system/bin/sh
 # 由 deploy-device-watch.sh 根据 package_list.txt 生成，请勿手改
 exec sh $DEVICE_PATH/device-watch.sh"
@@ -170,55 +156,48 @@ exec sh $DEVICE_PATH/device-watch.sh"
 "
     RUN_SCRIPT_TMP=$(mktemp)
     echo "$RUN_SCRIPT_CONTENT" > "$RUN_SCRIPT_TMP"
-    echo "📤 推送启动脚本到设备 ($RUN_SCRIPT_NAME)..."
     $ADB_CMD push "$RUN_SCRIPT_TMP" "$DEVICE_PATH/$RUN_SCRIPT_NAME"
     $ADB_CMD shell chmod 755 "$DEVICE_PATH/$RUN_SCRIPT_NAME"
     rm -f "$RUN_SCRIPT_TMP"
     HAS_RUN_SCRIPT=1
+else
+    echo "[3/3] 未指定包名列表，跳过生成 $RUN_SCRIPT_NAME"
 fi
 
 echo ""
-echo "✅ 部署完成！"
+echo "部署完成（监控尚未启动）。"
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "📖 推荐用法（后台运行，可拔掉 USB）："
-echo ""
+echo "----------------------------------------------"
+echo "启动监控（后台运行，启动后可拔掉 USB）"
+echo "----------------------------------------------"
 if [ "$HAS_RUN_SCRIPT" -eq 1 ]; then
-    echo "  已根据 $PACKAGE_LIST_FILE 生成启动脚本，直接执行即可："
-    echo "    adb shell \"nohup sh $DEVICE_PATH/$RUN_SCRIPT_NAME > $DEVICE_PATH/watch.log 2>&1 &\""
     echo ""
-    echo "  启动后可拔掉 USB，监控在设备上继续；需查看时再连 USB。"
-    echo "  查看是否正常运行: adb shell cat $DEVICE_PATH/watch.log"
+    echo "  adb shell \"nohup sh $DEVICE_PATH/$RUN_SCRIPT_NAME > $DEVICE_PATH/watch.log 2>&1 &\""
 else
-    echo "  单包名:"
+    echo ""
+    echo "  单包:"
     echo "    adb shell \"nohup sh $DEVICE_PATH/device-watch.sh -p <包名> > $DEVICE_PATH/watch.log 2>&1 &\""
     echo ""
-    echo "  多包名:"
+    echo "  多包:"
     echo "    adb shell \"nohup sh $DEVICE_PATH/device-watch.sh -p <包名1> -p <包名2> > $DEVICE_PATH/watch.log 2>&1 &\""
     echo ""
-    echo "  或先准备 package_list.txt（每行一个包名），再执行："
+    echo "  若希望自动生成启动脚本，请带包名列表重新部署:"
     echo "    $0 package_list.txt"
-    echo "  然后设备上执行: adb shell \"nohup sh $DEVICE_PATH/$RUN_SCRIPT_NAME > $DEVICE_PATH/watch.log 2>&1 &\""
-    echo ""
-    echo "  启动后可拔掉 USB，监控在设备上继续；需查看时再连 USB。"
-    echo "  查看是否正常运行: adb shell cat $DEVICE_PATH/watch.log"
 fi
 echo ""
-echo "  查看帮助: adb shell sh $DEVICE_PATH/device-watch.sh -h"
+echo "查看运行日志:"
+echo "  adb shell cat $DEVICE_PATH/watch.log"
 echo ""
-echo "🛑 停止监控:"
-echo "     adb shell \"kill \\\$(ps -ef | grep device-watch.sh | grep -v grep | awk '{print \\\$2}')\""
+echo "查看帮助:"
+echo "  adb shell sh $DEVICE_PATH/device-watch.sh -h"
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "停止监控:"
+echo "  adb shell \"kill \\\$(ps -ef | grep device-watch.sh | grep -v grep | awk '{print \\\$2}')\""
 echo ""
-echo "📊 后续分析 hprof 文件："
+echo "----------------------------------------------"
+echo "拉取并分析 hprof"
+echo "----------------------------------------------"
 echo ""
-echo "  1. 拉取 hprof 文件:"
-echo "     adb pull $DEVICE_PATH/mem-analyze/ ./"
-echo ""
-echo "  2. 分析 hprof:"
-echo "     java -jar mem-analyze-1.0.0-all.jar -f <hprof文件>"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  adb pull $DEVICE_PATH/mem-analyze/ ./"
+echo "  java -jar mem-analyze-1.0.0-all.jar -f <hprof文件>"
 echo ""
